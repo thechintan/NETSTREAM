@@ -1,5 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { CategoryDto, ChannelDto, RotateStreamKeyResponse } from '@netstream/shared';
+import {
+  CategoryDto,
+  ChannelDto,
+  ChannelModDto,
+  RotateStreamKeyResponse,
+} from '@netstream/shared';
 import { useAuth } from '../features/auth/AuthContext';
 import { api } from '../lib/api';
 import { Button } from '../components/ui/Button';
@@ -23,6 +28,13 @@ export const Settings: React.FC = () => {
   const [rotatedKey, setRotatedKey] = useState<string | null>(null);
   const [isCopied, setIsCopied] = useState(false);
 
+  // Moderator management state
+  const [mods, setMods] = useState<ChannelModDto[]>([]);
+  const [isLoadingMods, setIsLoadingMods] = useState(false);
+  const [newModUsername, setNewModUsername] = useState('');
+  const [isAddingMod, setIsAddingMod] = useState(false);
+  const [removingModUsername, setRemovingModUsername] = useState<string | null>(null);
+
   useEffect(() => {
     if (channel) {
       setTitle(channel.title || '');
@@ -31,6 +43,7 @@ export const Settings: React.FC = () => {
     }
   }, [channel]);
 
+  // Load categories
   useEffect(() => {
     let isMounted = true;
     async function loadCategories() {
@@ -51,6 +64,31 @@ export const Settings: React.FC = () => {
       isMounted = false;
     };
   }, [showToast]);
+
+  // Load moderators
+  useEffect(() => {
+    if (!channel?.id) return;
+    let isMounted = true;
+
+    async function loadMods() {
+      setIsLoadingMods(true);
+      try {
+        const res = await api.get<{ mods: ChannelModDto[] }>(`/api/channels/${channel!.id}/mods`);
+        if (isMounted && res?.mods) {
+          setMods(res.mods);
+        }
+      } catch {
+        // Failed to load mods
+      } finally {
+        if (isMounted) setIsLoadingMods(false);
+      }
+    }
+
+    loadMods();
+    return () => {
+      isMounted = false;
+    };
+  }, [channel?.id]);
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,7 +118,11 @@ export const Settings: React.FC = () => {
   };
 
   const handleRotateKey = async () => {
-    if (!confirm('Are you sure you want to rotate your stream key? Any active stream using the old key will be disconnected.')) {
+    if (
+      !confirm(
+        'Are you sure you want to rotate your stream key? Any active stream using the old key will be disconnected.'
+      )
+    ) {
       return;
     }
 
@@ -102,48 +144,84 @@ export const Settings: React.FC = () => {
     try {
       await navigator.clipboard.writeText(rotatedKey);
       setIsCopied(true);
-      showToast('Stream key copied to clipboard', 'success');
-      setTimeout(() => setIsCopied(false), 2000);
+      showToast('Stream key copied to clipboard!', 'info');
+      setTimeout(() => setIsCopied(false), 3000);
     } catch {
-      showToast('Failed to copy to clipboard', 'error');
+      showToast('Failed to copy stream key', 'error');
+    }
+  };
+
+  const handleAddModerator = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const username = newModUsername.trim();
+    if (!username || !channel?.id) return;
+
+    setIsAddingMod(true);
+    try {
+      const added = await api.post<ChannelModDto>(`/api/channels/${channel.id}/mods`, {
+        username,
+      });
+      setMods((prev) => [...prev.filter((m) => m.userId !== added.userId), added]);
+      setNewModUsername('');
+      showToast(`Added @${username} as a moderator`, 'success');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to add moderator', 'error');
+    } finally {
+      setIsAddingMod(false);
+    }
+  };
+
+  const handleRemoveModerator = async (username: string) => {
+    if (!channel?.id) return;
+    setRemovingModUsername(username);
+
+    try {
+      await api.delete(`/api/channels/${channel.id}/mods`, { username });
+      setMods((prev) => prev.filter((m) => m.username.toLowerCase() !== username.toLowerCase()));
+      showToast(`Removed @${username} from moderators`, 'info');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to remove moderator', 'error');
+    } finally {
+      setRemovingModUsername(null);
     }
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8 space-y-10">
+    <div className="max-w-4xl mx-auto space-y-8 pb-16">
+      {/* Page Header */}
       <div>
-        <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">Channel Settings</h1>
-        <p className="text-gray-400 mt-1 text-sm">
-          Update your channel information and manage your streaming credentials.
+        <h1 className="text-2xl font-bold text-white tracking-tight">Channel Settings</h1>
+        <p className="text-sm text-gray-400 mt-1">
+          Manage your stream details, moderators, and ingestion stream keys.
         </p>
       </div>
 
-      {/* Broadcast Details Form */}
+      {/* General Settings Section */}
       <section className="bg-gray-900 border border-gray-800 rounded-xl p-6 sm:p-8 space-y-6">
         <div className="border-b border-gray-800 pb-4">
           <h2 className="text-lg font-semibold text-white">Stream Information</h2>
           <p className="text-xs text-gray-400 mt-0.5">
-            This information is shown to viewers on your channel page and browse directory.
+            Update your public broadcast title, category, and chat pacing.
           </p>
         </div>
 
-        <form onSubmit={handleSaveSettings} className="space-y-5">
-          <div>
-            <label htmlFor="title" className="block text-xs font-semibold text-gray-300 uppercase tracking-wider mb-2">
-              Stream Title ({title.length}/100)
-            </label>
-            <Input
-              id="title"
-              value={title}
-              maxLength={100}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Building an SFU WebRTC Streamer from Scratch!"
-              required
-            />
-          </div>
+        <form onSubmit={handleSaveSettings} className="space-y-4">
+          <Input
+            label="Stream Title"
+            id="title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="e.g. Building a live streaming platform from scratch!"
+            maxLength={100}
+            required
+            helperText={`${title.length}/100 characters`}
+          />
 
           <div>
-            <label htmlFor="category" className="block text-xs font-semibold text-gray-300 uppercase tracking-wider mb-2">
+            <label
+              htmlFor="category"
+              className="block text-xs font-semibold text-gray-300 uppercase tracking-wider mb-2"
+            >
               Category
             </label>
             <select
@@ -163,7 +241,10 @@ export const Settings: React.FC = () => {
           </div>
 
           <div>
-            <label htmlFor="slowSeconds" className="block text-xs font-semibold text-gray-300 uppercase tracking-wider mb-2">
+            <label
+              htmlFor="slowSeconds"
+              className="block text-xs font-semibold text-gray-300 uppercase tracking-wider mb-2"
+            >
               Slow Mode (0 - 120 seconds)
             </label>
             <input
@@ -172,7 +253,9 @@ export const Settings: React.FC = () => {
               min={0}
               max={120}
               value={slowSeconds}
-              onChange={(e) => setSlowSeconds(Math.max(0, Math.min(120, parseInt(e.target.value, 10) || 0)))}
+              onChange={(e) =>
+                setSlowSeconds(Math.max(0, Math.min(120, parseInt(e.target.value, 10) || 0)))
+              }
               className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition"
             />
             <p className="text-xs text-gray-500 mt-1">
@@ -188,6 +271,71 @@ export const Settings: React.FC = () => {
         </form>
       </section>
 
+      {/* Moderators Management Section */}
+      <section className="bg-gray-900 border border-gray-800 rounded-xl p-6 sm:p-8 space-y-6">
+        <div className="border-b border-gray-800 pb-4">
+          <h2 className="text-lg font-semibold text-white">Channel Moderators</h2>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Moderators can delete messages, timeout or ban disruptive viewers, and adjust slow mode.
+          </p>
+        </div>
+
+        {/* Add Moderator Form */}
+        <form onSubmit={handleAddModerator} className="flex gap-2 items-center">
+          <div className="flex-1">
+            <Input
+              id="newMod"
+              value={newModUsername}
+              onChange={(e) => setNewModUsername(e.target.value)}
+              placeholder="Enter exact username..."
+            />
+          </div>
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={!newModUsername.trim() || isAddingMod}
+            isLoading={isAddingMod}
+          >
+            Add Moderator
+          </Button>
+        </form>
+
+        {/* Moderator List */}
+        <div className="border border-gray-800 rounded-lg overflow-hidden divide-y divide-gray-800 bg-gray-950">
+          {isLoadingMods ? (
+            <div className="p-4 text-xs text-gray-500 text-center">Loading moderators...</div>
+          ) : mods.length === 0 ? (
+            <div className="p-4 text-xs text-gray-500 text-center">
+              No moderators assigned yet. Add trusted users above to help moderate your stream.
+            </div>
+          ) : (
+            mods.map((mod) => (
+              <div
+                key={mod.userId}
+                className="flex items-center justify-between px-4 py-3 text-sm"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  <span className="font-medium text-white">{mod.username}</span>
+                  <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-1.5 py-0.5 rounded">
+                    MOD
+                  </span>
+                </div>
+                <Button
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  onClick={() => void handleRemoveModerator(mod.username)}
+                  isLoading={removingModUsername === mod.username}
+                >
+                  Remove
+                </Button>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+
       {/* Stream Key Section */}
       <section className="bg-gray-900 border border-gray-800 rounded-xl p-6 sm:p-8 space-y-6">
         <div className="border-b border-gray-800 pb-4">
@@ -201,7 +349,9 @@ export const Settings: React.FC = () => {
           <div>
             <div className="text-sm font-medium text-white flex items-center gap-2">
               <span>Primary Stream Key</span>
-              <span className="text-xs font-mono text-gray-500">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>
+              <span className="text-xs font-mono text-gray-500">
+                &bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;
+              </span>
             </div>
             <p className="text-xs text-gray-400 mt-1">
               For security reasons, your plain stream key is never stored on the server.
@@ -227,11 +377,7 @@ export const Settings: React.FC = () => {
         title="New Stream Key Generated"
         footer={
           <div className="flex justify-end gap-2 w-full">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setRotatedKey(null)}
-            >
+            <Button variant="secondary" size="sm" onClick={() => setRotatedKey(null)}>
               Done
             </Button>
           </div>
@@ -239,11 +385,22 @@ export const Settings: React.FC = () => {
       >
         <div className="space-y-4">
           <div className="p-3 bg-amber-950/50 border border-amber-800/60 rounded-lg text-amber-200 text-xs leading-relaxed flex items-start gap-2">
-            <svg className="w-5 h-5 flex-shrink-0 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            <svg
+              className="w-5 h-5 flex-shrink-0 text-amber-400"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              />
             </svg>
             <div>
-              <strong className="font-semibold">Copy this key now!</strong> This key will only be displayed once. Once this window is closed, it cannot be retrieved again.
+              <strong className="font-semibold">Copy this key now!</strong> This key will only be
+              displayed once. Once this window is closed, it cannot be retrieved again.
             </div>
           </div>
 
@@ -258,12 +415,7 @@ export const Settings: React.FC = () => {
                 value={rotatedKey || ''}
                 className="w-full px-3 py-2 font-mono text-sm bg-gray-950 border border-gray-700 rounded-lg text-purple-300 select-all focus:outline-none"
               />
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={handleCopyKey}
-              >
+              <Button type="button" variant="secondary" size="sm" onClick={handleCopyKey}>
                 {isCopied ? 'Copied!' : 'Copy'}
               </Button>
             </div>

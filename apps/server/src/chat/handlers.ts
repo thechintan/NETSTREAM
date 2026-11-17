@@ -3,6 +3,11 @@ import { redis, redisSub } from '../lib/redis.js';
 import { Conn } from '../realtime/conn.js';
 import { WebSocketGateway } from '../realtime/gateway.js';
 import { getChannelSlowSeconds } from '../channels/service.js';
+import {
+  getChannelRole,
+  getUserTimeout,
+  isUserBanned,
+} from '../moderation/service.js';
 import { getChatPersistenceWorker } from './persistence.js';
 import {
   formatChatMessage,
@@ -11,9 +16,9 @@ import {
   stripControlCharacters,
 } from './service.js';
 
-// Moderator check stub for Task 8 (moderators are added in Task 9)
-export function isModFor(_userId: string, _channelId: string): boolean {
-  return false;
+export async function isModFor(userId: string, channelId: string): Promise<boolean> {
+  const role = await getChannelRole({ id: userId }, channelId);
+  return role === 'owner' || role === 'moderator';
 }
 
 export function registerChatHandlers(gateway: WebSocketGateway): void {
@@ -23,6 +28,23 @@ export function registerChatHandlers(gateway: WebSocketGateway): void {
   const onRedisMessage = (channel: string, messageStr: string) => {
     if (channel.startsWith('chat:')) {
       gateway.broadcastRawToRoom(channel, messageStr);
+
+      // If a user was banned, remove their socket from this chat room immediately
+      try {
+        const parsed = JSON.parse(messageStr);
+        if (parsed.t === 'user.banned' && parsed.d?.userId) {
+          const roomMembers = gateway.rooms.get(channel);
+          if (roomMembers) {
+            for (const member of [...roomMembers]) {
+              if (member.user.id === parsed.d.userId) {
+                gateway.leaveRoom(member, channel);
+              }
+            }
+          }
+        }
+      } catch {
+        // Ignore unparseable broadcast
+      }
     }
   };
 
@@ -80,6 +102,28 @@ export function registerChatHandlers(gateway: WebSocketGateway): void {
     }
 
     const { channelId, text } = msg.d;
+
+    // 2. Banned users get BANNED and their connection is removed immediately
+    const banned = await isUserBanned(channelId, conn.user.id);
+    if (banned) {
+      gateway.leaveRoom(conn, `chat:${channelId}`);
+      conn.fail(msg.id, 'BANNED', 'You are banned from chatting in this channel');
+      return;
+    }
+
+    // 3. Timed-out users get TIMED_OUT with the remaining time
+    const timeout = await getUserTimeout(channelId, conn.user.id);
+    if (timeout.timedOut) {
+      const retryAfterMs = timeout.remainingSeconds * 1000;
+      conn.fail(
+        msg.id,
+        'TIMED_OUT',
+        `You are timed out from chatting. Please wait ${timeout.remainingSeconds}s.`,
+        retryAfterMs
+      );
+      return;
+    }
+
     const sanitized = stripControlCharacters(text).trim();
 
     if (!sanitized) {
@@ -92,7 +136,7 @@ export function registerChatHandlers(gateway: WebSocketGateway): void {
       return;
     }
 
-    // 2. Per-user per-channel rate limit: 20 messages per 30 seconds
+    // 4. Per-user per-channel rate limit: 20 messages per 30 seconds
     const rateKey = `ratelimit:chat:${channelId}:${conn.user.id}`;
     const count = await redis.incr(rateKey);
     if (count === 1) {
@@ -110,8 +154,12 @@ export function registerChatHandlers(gateway: WebSocketGateway): void {
       return;
     }
 
-    // 3. Slow mode enforcement for non-moderators
-    if (!isModFor(conn.user.id, channelId)) {
+    // 5. Role check for slow mode & badges
+    const role = await getChannelRole(conn.user, channelId);
+    const isModOrOwner = role === 'owner' || role === 'moderator';
+
+    // Slow mode enforcement for non-moderators
+    if (!isModOrOwner) {
       const slowSeconds = await getChannelSlowSeconds(channelId);
       if (slowSeconds > 0) {
         const slowKey = `slow:${channelId}:${conn.user.id}`;
@@ -130,13 +178,21 @@ export function registerChatHandlers(gateway: WebSocketGateway): void {
       }
     }
 
-    // 4. Format message with ULID and deterministic color
-    const chatMsg = formatChatMessage(channelId, conn.user, sanitized);
+    // 6. Badges: add 'owner' and 'mod' to message user.badges
+    const badges: string[] = [];
+    if (role === 'owner') {
+      badges.push('owner');
+    } else if (role === 'moderator') {
+      badges.push('mod');
+    }
 
-    // 5. Publish to Redis & recent list (delivered via Redis pub/sub)
+    // 7. Format message with ULID, deterministic color, and badges
+    const chatMsg = formatChatMessage(channelId, conn.user, sanitized, badges);
+
+    // 8. Publish to Redis & recent list (delivered via Redis pub/sub)
     await publishChatMessage(chatMsg);
 
-    // 6. Enqueue for database batch persistence
+    // 9. Enqueue for database batch persistence
     getChatPersistenceWorker().enqueue(chatMsg);
 
     return { ok: true, mid: chatMsg.mid };

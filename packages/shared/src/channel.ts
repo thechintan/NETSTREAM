@@ -16,10 +16,25 @@ export const channelDetailDtoSchema = z.object({
   followerCount: z.number(),
   isLive: z.boolean(),
   ownerUsername: z.string(),
+  ownerId: z.string().uuid().optional(),
   isFollowing: z.boolean().optional(),
+  isMod: z.boolean().optional(),
 });
 
 export type ChannelDetailDto = z.infer<typeof channelDetailDtoSchema>;
+
+export const channelModDtoSchema = z.object({
+  userId: z.string().uuid(),
+  username: z.string(),
+});
+
+export type ChannelModDto = z.infer<typeof channelModDtoSchema>;
+
+export const addModSchema = z.object({
+  username: z.string().min(1, 'Username is required'),
+});
+
+export type AddModInput = z.infer<typeof addModSchema>;
 
 export const updateChannelSchema = z.object({
   title: z

@@ -18,6 +18,8 @@ export type WsErrorCode =
   | 'NOT_FOUND'
   | 'RATE_LIMITED'
   | 'SLOW_MODE'
+  | 'BANNED'
+  | 'TIMED_OUT'
   | 'INTERNAL_ERROR'
   | 'TIMEOUT'
   | 'UNKNOWN_TYPE';
@@ -95,22 +97,37 @@ export const modBanPayloadSchema = z.object({
   reason: z.string().max(255).optional(),
 });
 
-export const modTimeoutPayloadSchema = z.object({
-  channelId: z.string().uuid(),
-  userId: z.string().uuid(),
-  durationSeconds: z.number().int().positive().max(86400 * 30),
-  reason: z.string().max(255).optional(),
-});
+export const modTimeoutPayloadSchema = z
+  .object({
+    channelId: z.string().uuid(),
+    userId: z.string().uuid(),
+    seconds: z.number().int().positive().max(86400 * 30).optional(),
+    durationSeconds: z.number().int().positive().max(86400 * 30).optional(),
+    reason: z.string().max(255).optional(),
+  })
+  .refine((data) => data.seconds !== undefined || data.durationSeconds !== undefined, {
+    message: 'Either seconds or durationSeconds must be provided',
+  });
 
-export const modDeletePayloadSchema = z.object({
-  channelId: z.string().uuid(),
-  messageId: z.string().min(1),
-});
+export const modDeletePayloadSchema = z
+  .object({
+    channelId: z.string().uuid(),
+    mid: z.string().min(1).optional(),
+    messageId: z.string().min(1).optional(),
+  })
+  .refine((data) => data.mid !== undefined || data.messageId !== undefined, {
+    message: 'Either mid or messageId must be provided',
+  });
 
-export const modSlowPayloadSchema = z.object({
-  channelId: z.string().uuid(),
-  slowSeconds: z.number().int().min(0).max(3600),
-});
+export const modSlowPayloadSchema = z
+  .object({
+    channelId: z.string().uuid(),
+    seconds: z.number().int().min(0).max(3600).optional(),
+    slowSeconds: z.number().int().min(0).max(3600).optional(),
+  })
+  .refine((data) => data.seconds !== undefined || data.slowSeconds !== undefined, {
+    message: 'Either seconds or slowSeconds must be provided',
+  });
 
 // Real payload schema for user.subscribe
 export const userSubscribePayloadSchema = z.object({

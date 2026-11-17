@@ -9,6 +9,7 @@ import {
 } from '@netstream/shared';
 import {
   categories,
+  channelMods,
   channels,
   db,
   follows,
@@ -40,6 +41,7 @@ export async function getChannelByName(
       name: channels.name,
       title: channels.title,
       isLive: channels.isLive,
+      ownerId: channels.ownerId,
       categoryId: categories.id,
       categoryName: categories.name,
       categoryThumbnailUrl: categories.thumbnailUrl,
@@ -62,8 +64,9 @@ export async function getChannelByName(
 
   const followerCount = followersResult ? Number(followersResult.count) : 0;
 
-  // Check if current user is following
+  // Check if current user is following and whether they are a moderator
   let isFollowing: boolean | undefined = undefined;
+  let isMod: boolean | undefined = undefined;
   if (currentUserId) {
     const [followRecord] = await db
       .select({ userId: follows.userId })
@@ -75,6 +78,17 @@ export async function getChannelByName(
         )
       );
     isFollowing = Boolean(followRecord);
+
+    const [modRecord] = await db
+      .select({ userId: channelMods.userId })
+      .from(channelMods)
+      .where(
+        and(
+          eq(channelMods.channelId, channelData.id),
+          eq(channelMods.userId, currentUserId)
+        )
+      );
+    isMod = Boolean(modRecord);
   }
 
   return {
@@ -91,7 +105,9 @@ export async function getChannelByName(
     followerCount,
     isLive: channelData.isLive,
     ownerUsername: channelData.ownerUsername,
+    ownerId: channelData.ownerId,
     isFollowing,
+    isMod,
   };
 }
 

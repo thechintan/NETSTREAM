@@ -4,6 +4,7 @@ import { VERSION } from '@netstream/shared';
 import { registerAuthRoutes } from './auth/routes.js';
 import { registerChannelRoutes } from './channels/routes.js';
 import { getChatPersistenceWorker, registerChatHandlers } from './chat/index.js';
+import { registerModerationHandlers, registerModerationRoutes } from './moderation/index.js';
 import { config } from './config/index.js';
 import { pingDb } from './db/index.js';
 import { pingRedis } from './lib/redis.js';
@@ -31,6 +32,7 @@ export function buildApp(gatewayOptions?: GatewayOptions): FastifyInstance & { g
   // Attach WebSocket gateway
   const gateway = new WebSocketGateway(gatewayOptions);
   registerChatHandlers(gateway);
+  registerModerationHandlers(gateway);
   app.server.on('upgrade', (req, socket, head) => {
     void gateway.handleUpgrade(req, socket, head);
   });
@@ -50,6 +52,9 @@ export function buildApp(gatewayOptions?: GatewayOptions): FastifyInstance & { g
 
   // Register channel, category, follow routes
   registerChannelRoutes(app);
+
+  // Register moderation routes
+  registerModerationRoutes(app);
 
   // Health check endpoint
   app.get('/api/health', async (_request, reply) => {

@@ -263,9 +263,10 @@ describe('Task 8: Chat Rate Limiting, Slow Mode, Replay & Persistence Tests', ()
     const registerRes = await app.inject({
       method: 'POST',
       url: '/api/auth/register',
+      remoteAddress: `10.88.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`,
       payload: {
         email: `hist_user_${Date.now()}@netstream.live`,
-        username: `hist_user_${Date.now().toString(36)}`,
+        username: `hist_${Date.now().toString().slice(-6)}_${Math.random().toString(36).slice(2, 5)}`,
         password: 'Password123!',
       },
     });

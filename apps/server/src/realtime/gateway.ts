@@ -264,6 +264,9 @@ export class WebSocketGateway {
     for (const conn of this.conns.values()) {
       conn.ws.terminate();
     }
+    for (const ws of this.wss.clients) {
+      ws.terminate();
+    }
     this.conns.clear();
     this.rooms.clear();
 

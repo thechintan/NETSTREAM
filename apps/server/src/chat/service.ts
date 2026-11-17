@@ -18,7 +18,8 @@ export function stripControlCharacters(text: string): string {
 export function formatChatMessage(
   channelId: string,
   user: ConnUser,
-  rawText: string
+  rawText: string,
+  badges: string[] = []
 ): ChatMessageDto {
   const sanitizedText = stripControlCharacters(rawText).trim();
 
@@ -29,7 +30,7 @@ export function formatChatMessage(
       id: user.id,
       name: user.username,
       color: getUserColor(user.username),
-      badges: [],
+      badges,
     },
     text: sanitizedText,
     ts: Date.now(),

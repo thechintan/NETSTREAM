@@ -138,7 +138,11 @@ export const api = {
       method: 'PATCH',
       body: body !== undefined ? JSON.stringify(body) : undefined,
     }),
-  delete: <T>(url: string, options?: RequestOptions) =>
-    apiFetch<T>(url, { ...options, method: 'DELETE' }),
+  delete: <T>(url: string, body?: unknown, options?: RequestOptions) =>
+    apiFetch<T>(url, {
+      ...options,
+      method: 'DELETE',
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    }),
   refreshSession: performRefresh,
 };

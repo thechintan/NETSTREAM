@@ -231,7 +231,12 @@ export const Channel: React.FC = () => {
 
       {/* Right Column: 340px Chat Panel (stacks below on mobile) */}
       <div className="w-full lg:w-[340px] shrink-0 h-[500px] lg:h-[620px]">
-        <ChatPanel channelId={channel.id} channelName={channel.name} />
+        <ChatPanel
+          channelId={channel.id}
+          channelName={channel.name}
+          channelOwnerId={channel.ownerId}
+          isMod={channel.isMod}
+        />
       </div>
     </div>
   );

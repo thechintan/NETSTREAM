@@ -132,8 +132,43 @@
     - Temporarily disables the chat input and displays a visible live countdown badge (e.g. "Slow mode: wait 10s...") until the cooldown expires.
     - Added Slow Mode input control (0-120s) to Channel Settings (`/settings`).
   - Added 5 comprehensive Vitest integration tests in `apps/server/src/chat/task8.integration.test.ts` covering 21st message rejection, slow mode blocking & expiration, replay by `lastMid`, batch persistence flush triggers (count and timer), and cursor pagination. All 39 tests pass.
+- Implemented Roles and Moderation (TASK 9):
+  - Permissions Service (`apps/server/src/moderation/service.ts`):
+    - Defined roles per channel: `owner`, `moderator` (via `channel_mods`), `viewer`, and `guest`.
+    - Implemented permission matrix `can(user, channelId, action)`: viewers send messages; mods and owner can delete messages (`chat:delete`), timeout (`chat:timeout`), ban (`chat:ban`), and change slow mode (`chat:slow`); only owner adds or removes mods (`mod:manage`).
+    - Implemented `canModerateTarget(actorId, targetUserId, channelId)` enforcing immunity rules: owners cannot be moderated/banned; moderators cannot moderate or ban the channel owner or other moderators; users cannot moderate themselves.
+    - Redis hot-path ban caching: checks `bans:{channelId}` set with Postgres fallback and cache warming; writes bans to DB table `bans` and logs audit events to `mod_actions`.
+    - Timeouts: stored in Redis key `timeout:{channelId}:{userId}` with TTL, returning remaining seconds, and audited in `mod_actions`.
+  - Channel REST Endpoints (`apps/server/src/moderation/routes.ts` & `apps/server/src/channels`):
+    - `POST /api/channels/:id/mods` { username } (owner only, validates target, creates `channel_mods` row, logs audit).
+    - `DELETE /api/channels/:id/mods` { username } (owner only, supports body/query, removes `channel_mods` row, logs audit).
+    - `GET /api/channels/:id/mods` (lists all active moderators with IDs and usernames).
+    - Enriched `GET /api/channels/:name` with `ownerId` and `isMod` flags for client permission resolution.
+  - WebSocket Moderation Handlers (`apps/server/src/moderation/handlers.ts`):
+    - `mod.delete { channelId, mid }`: validates permission, logs deletion in `mod_actions`, and broadcasts push event `{ t: 'chat.deleted', d: { mid } }` through Redis pub/sub.
+    - `mod.timeout { channelId, userId, seconds, reason? }`: validates target immunity, sets Redis key with TTL, broadcasts system notice to chat room, and logs audit.
+    - `mod.ban { channelId, userId, reason? }`: validates target immunity, persists to DB and Redis hot-path set, broadcasts `{ t: 'user.banned', d: { channelId, userId } }`, and immediately kicks the banned socket from the chat room across all gateways.
+    - `mod.slow { channelId, seconds }`: validates permission, updates DB and Redis hash, broadcasts slow mode system notice.
+  - Chat Enforcement & Badges (`apps/server/src/chat/handlers.ts` & `service.ts`):
+    - Banned users get `BANNED` error and immediate eviction from chat room on `chat.send`.
+    - Timed-out users get `TIMED_OUT` error with `retryAfterMs` remaining cooldown.
+    - Added deterministic `'owner'` and `'mod'` badges to message payload `user.badges`.
+  - Web UI Moderation Features:
+    - Hover action menu on chat messages for authorized users (Delete, Timeout with 1m / 10m / 1h shortcuts, Ban) with immunity guards.
+    - Deleted messages automatically replaced inline with `<span className="italic text-gray-500">message deleted</span>`.
+    - Live badges for `[OWNER]` and `[MOD]` rendered next to user names.
+    - Banned user banner and disabled input ("You have been banned from chatting in this channel").
+    - Timed-out banner with live countdown timer and disabled input during timeout.
+    - Quick Slow Mode adjustment popover in chat header for channel owner and mods (Off, 5s, 10s, 30s, 60s, 120s).
+    - Dedicated "Channel Moderators" section in Channel Settings (`/settings`) allowing stream owners to view, add by username, and revoke moderators.
+  - Added 7 comprehensive Vitest integration tests in `apps/server/src/moderation/moderation.integration.test.ts` verifying permission matrix across all 4 roles and 6 actions, owner and mod immunity rules, REST endpoints authorization, WebSocket message deletion broadcast, timeout expiry, ban persistence across reconnects, and message badges. All 46 tests pass.
 
 ## Decisions
+- **Target Moderation Immunity Hierarchy**: Channel owners are immune to all moderation actions (ban, timeout). Moderators cannot moderate other moderators or the owner. Any moderation attempt violating this hierarchy returns `FORBIDDEN` ("Cannot moderate the channel owner" or "Moderators cannot moderate other moderators").
+- **Real-Time Cross-Gateway Room Eviction**: When a user is banned via `mod.ban`, the event `user.banned` is broadcast to Redis channel `chat:{channelId}`. Every gateway subscribing to that room evicts any matching local socket connection for that user immediately, preventing any further chat participation without waiting for polling.
+- **Hot-Path Redis Ban Caching**: Banned user checks on the `chat.send` critical path first query the Redis set `bans:{channelId}` (O(1)). On cache miss, it queries PostgreSQL `bans` table; if an active ban is found, it warms the Redis set. Unbans atomically remove the user from both PostgreSQL and the Redis set.
+- **Inline Message Tombstones**: When a message is deleted via `mod.delete`, gateways broadcast `{ t: 'chat.deleted', d: { mid } }`. Connected clients immediately replace the message text with `"message deleted"` in-place without removing the row, preserving chat stream continuity.
+- **REST and Query Tolerance on DELETE**: `DELETE /api/channels/:id/mods` accepts the target username in both request JSON body and query parameters, ensuring compatibility across all HTTP clients and reverse proxies.
 - **Non-blocking Chat Persistence**: Chat message delivery remains sub-millisecond over WebSocket and Redis pub/sub. Database persistence is performed asynchronously by a decoupled in-memory batch worker (`ChatPersistenceWorker`), isolating PostgreSQL write latency from the chat hot path.
 - **ULID-based Reconnect Replay & History Pagination**: Reconnect replay and REST history pagination exploit ULID lexicographical sorting (`msg.mid > lastMid` and `chatMessages.id < before`), guaranteeing strict chronological message ordering across reconnects.
 - **Slow Mode Redis Invalidation**: Channel `slowSeconds` is cached in Redis hash `chan:{channelId}:settings`. Any update via `PATCH /api/channels/me` updates both Postgres and Redis atomically, ensuring instantaneous enforcement without stale read windows.
