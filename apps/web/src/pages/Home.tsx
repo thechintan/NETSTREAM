@@ -1,117 +1,133 @@
-import { useEffect, useState } from 'react';
-import { VERSION } from '@netstream/shared';
+import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { LiveChannelDto } from '@netstream/shared';
+import { Avatar } from '../components/ui/Avatar';
+import { Skeleton } from '../components/ui/Skeleton';
+import { api } from '../lib/api';
 
-interface HealthData {
-  ok: boolean;
-  db: boolean;
-  redis: boolean;
-  version?: string;
-}
-
-export function Home() {
-  const [health, setHealth] = useState<HealthData | null>(null);
+export const Home: React.FC = () => {
+  const [liveChannels, setLiveChannels] = useState<LiveChannelDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const checkHealth = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch('/api/health');
-      const data = (await response.json()) as HealthData;
-      setHealth(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to connect to /api/health');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    void checkHealth();
+    let isMounted = true;
+
+    const fetchLive = async () => {
+      try {
+        const data = await api.get<LiveChannelDto[]>('/api/live');
+        if (isMounted) {
+          setLiveChannels(data || []);
+        }
+      } catch (err) {
+        if (isMounted) {
+          setError(err instanceof Error ? err.message : 'Failed to load live channels');
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void fetchLive();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   return (
-    <main className="max-w-2xl mx-auto p-6 space-y-6">
-      <header className="border-b border-slate-700 pb-4">
-        <h1 className="text-3xl font-bold tracking-tight text-indigo-400">NetStream Live</h1>
+    <div className="space-y-6">
+      <header className="border-b border-slate-800 pb-4">
+        <h1 className="text-2xl font-bold tracking-tight text-slate-100">Live Channels</h1>
         <p className="text-sm text-slate-400 mt-1">
-          University Computer Networks Live Streaming Platform (v{VERSION})
+          Explore sub-second live broadcasts on NetStream Live.
         </p>
       </header>
 
-      <section className="bg-slate-800 rounded-lg p-6 border border-slate-700 shadow-md space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold">Backend System Health</h2>
-          <button
-            onClick={() => void checkHealth()}
-            className="px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 rounded transition"
-            disabled={loading}
-          >
-            {loading ? 'Checking...' : 'Refresh'}
-          </button>
+      {error && (
+        <div className="p-4 bg-rose-950/60 border border-rose-500/40 text-rose-200 rounded-xl text-sm">
+          {error}
         </div>
+      )}
 
-        {error && (
-          <div className="p-3 bg-red-950/60 border border-red-500/50 text-red-200 rounded text-sm">
-            {error}
+      {loading ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="space-y-3">
+              <Skeleton className="aspect-video w-full rounded-xl" />
+              <div className="flex gap-3">
+                <Skeleton className="w-10 h-10 rounded-full shrink-0" />
+                <div className="space-y-1.5 flex-1">
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-3 w-1/2" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : liveChannels.length === 0 ? (
+        <div className="py-16 text-center space-y-4 max-w-md mx-auto">
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500">
+            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
           </div>
-        )}
-
-        {health && (
-          <div className="grid grid-cols-3 gap-4 text-center mt-4">
-            <div className="p-4 bg-slate-900 rounded-md border border-slate-700/80">
-              <span className="text-xs uppercase text-slate-400 font-semibold block mb-1">
-                Overall API
-              </span>
-              <span
-                data-testid="status-overall"
-                className={`text-lg font-bold ${
-                  health.ok ? 'text-emerald-400' : 'text-rose-400'
-                }`}
-              >
-                {health.ok ? 'ONLINE' : 'DEGRADED'}
-              </span>
-            </div>
-
-            <div className="p-4 bg-slate-900 rounded-md border border-slate-700/80">
-              <span className="text-xs uppercase text-slate-400 font-semibold block mb-1">
-                PostgreSQL 16
-              </span>
-              <span
-                data-testid="status-db"
-                className={`text-lg font-bold ${
-                  health.db ? 'text-emerald-400' : 'text-rose-400'
-                }`}
-              >
-                {health.db ? 'CONNECTED' : 'DOWN'}
-              </span>
-            </div>
-
-            <div className="p-4 bg-slate-900 rounded-md border border-slate-700/80">
-              <span className="text-xs uppercase text-slate-400 font-semibold block mb-1">
-                Redis 7
-              </span>
-              <span
-                data-testid="status-redis"
-                className={`text-lg font-bold ${
-                  health.redis ? 'text-emerald-400' : 'text-rose-400'
-                }`}
-              >
-                {health.redis ? 'CONNECTED' : 'DOWN'}
-              </span>
-            </div>
-          </div>
-        )}
-
-        {health && (
-          <div className="pt-2">
-            <p className="text-xs text-slate-500">
-              Raw response: <code className="text-slate-300 font-mono">{JSON.stringify(health)}</code>
+          <div className="space-y-1">
+            <h3 className="text-lg font-semibold text-slate-200">No channels are live right now</h3>
+            <p className="text-sm text-slate-400">
+              When streamers go live from the browser, their broadcasts will appear here in real time.
             </p>
           </div>
-        )}
-      </section>
-    </main>
+          <div className="pt-2">
+            <Link
+              to="/studio"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition"
+            >
+              Start Streaming
+            </Link>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+          {liveChannels.map((stream) => (
+            <Link
+              key={stream.id}
+              to={`/c/${stream.name}`}
+              className="group flex flex-col space-y-2.5 rounded-xl transition hover:opacity-95"
+            >
+              {/* 16:9 Thumbnail placeholder */}
+              <div className="relative aspect-video w-full rounded-xl bg-slate-900 border border-slate-800 overflow-hidden flex items-center justify-center group-hover:border-indigo-500/50 transition">
+                <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-rose-600 text-white text-xs font-bold uppercase tracking-wider shadow">
+                  <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+                  LIVE
+                </div>
+                <div className="text-slate-600 group-hover:text-indigo-400 transition">
+                  <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                  </svg>
+                </div>
+              </div>
+
+              {/* Streamer metadata */}
+              <div className="flex gap-3 px-1">
+                <Avatar name={stream.ownerUsername} size="md" />
+                <div className="min-w-0 flex-1">
+                  <h4 className="text-sm font-semibold text-slate-100 truncate group-hover:text-indigo-400 transition">
+                    {stream.title}
+                  </h4>
+                  <p className="text-xs text-slate-400 truncate">{stream.ownerUsername}</p>
+                  {stream.category && (
+                    <span className="inline-block mt-1 px-2 py-0.5 text-[11px] font-medium bg-slate-800 text-slate-300 rounded-md">
+                      {stream.category.name}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
   );
-}
+};

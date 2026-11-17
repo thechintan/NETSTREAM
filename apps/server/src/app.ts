@@ -1,10 +1,14 @@
+import fastifyCookie from '@fastify/cookie';
 import Fastify, { FastifyInstance } from 'fastify';
 import { VERSION } from '@netstream/shared';
+import { registerAuthRoutes } from './auth/routes.js';
+import { registerChannelRoutes } from './channels/routes.js';
 import { config } from './config/index.js';
 import { pingDb } from './db/index.js';
 import { pingRedis } from './lib/redis.js';
+import { GatewayOptions, WebSocketGateway } from './realtime/index.js';
 
-export function buildApp(): FastifyInstance {
+export function buildApp(gatewayOptions?: GatewayOptions): FastifyInstance & { gateway: WebSocketGateway } {
   const isDev = config.NODE_ENV === 'development';
 
   const app = Fastify({
@@ -23,6 +27,28 @@ export function buildApp(): FastifyInstance {
     },
   });
 
+  // Attach WebSocket gateway
+  const gateway = new WebSocketGateway(gatewayOptions);
+  app.server.on('upgrade', (req, socket, head) => {
+    void gateway.handleUpgrade(req, socket, head);
+  });
+
+  app.addHook('onClose', async () => {
+    await gateway.close();
+  });
+
+  // Register cookie support
+  void app.register(fastifyCookie, {
+    secret: config.COOKIE_SECRET,
+  });
+
+  // Register auth and session routes
+  registerAuthRoutes(app);
+
+  // Register channel, category, follow routes
+  registerChannelRoutes(app);
+
+  // Health check endpoint
   app.get('/api/health', async (_request, reply) => {
     const [dbHealthy, redisHealthy] = await Promise.all([
       pingDb(),
@@ -39,5 +65,5 @@ export function buildApp(): FastifyInstance {
     });
   });
 
-  return app;
+  return Object.assign(app, { gateway });
 }
