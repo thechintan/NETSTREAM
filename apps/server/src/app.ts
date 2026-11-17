@@ -3,7 +3,7 @@ import Fastify, { FastifyInstance } from 'fastify';
 import { VERSION } from '@netstream/shared';
 import { registerAuthRoutes } from './auth/routes.js';
 import { registerChannelRoutes } from './channels/routes.js';
-import { registerChatHandlers } from './chat/index.js';
+import { getChatPersistenceWorker, registerChatHandlers } from './chat/index.js';
 import { config } from './config/index.js';
 import { pingDb } from './db/index.js';
 import { pingRedis } from './lib/redis.js';
@@ -37,6 +37,7 @@ export function buildApp(gatewayOptions?: GatewayOptions): FastifyInstance & { g
 
   app.addHook('onClose', async () => {
     await gateway.close();
+    await getChatPersistenceWorker().close();
   });
 
   // Register cookie support

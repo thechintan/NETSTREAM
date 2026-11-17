@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
-import { updateChannelSchema } from '@netstream/shared';
+import { chatHistoryQuerySchema, updateChannelSchema } from '@netstream/shared';
 import { optionalAuth, requireAuth } from '../auth/middleware.js';
+import { getPersistedChatHistory } from '../chat/service.js';
 import {
   followChannel,
   getCategories,
@@ -137,4 +138,23 @@ export function registerChannelRoutes(app: FastifyInstance) {
       return reply.status(200).send(list);
     }
   );
+
+  // GET /api/channels/:id/chat/history?before=<mid>&limit=50
+  app.get<{
+    Params: { id: string };
+    Querystring: { before?: string; limit?: string | number };
+  }>('/api/channels/:id/chat/history', async (request, reply) => {
+    const { id } = request.params;
+    const queryResult = chatHistoryQuerySchema.safeParse(request.query);
+    if (!queryResult.success) {
+      return reply.status(400).send({
+        error: 'VALIDATION_ERROR',
+        message: 'Invalid query parameters',
+      });
+    }
+
+    const { before, limit } = queryResult.data;
+    const messages = await getPersistedChatHistory(id, before, limit);
+    return reply.status(200).send({ messages });
+  });
 }

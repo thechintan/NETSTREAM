@@ -111,8 +111,32 @@
     - Chat input with 500-character counter, Enter-to-send shortcut, and a "Log in to chat" prompt for guests.
     - Integrated `ChatPanel` into `apps/web/src/pages/Channel.tsx`.
   - Added 4 comprehensive integration tests in `apps/server/src/chat/chat.integration.test.ts` verifying delivery only to matching rooms, guest rejection, history on join, and character length enforcement. All 34 tests pass.
+- Implemented Chat Rate Limiting, Slow Mode, Reconnect Replay & Persistence (TASK 8):
+  - Fixed-window rate limiting in Redis: enforced per-user per-channel limit of 20 messages per 30 seconds (`ratelimit:chat:{channelId}:{userId}`). Violations return `RATE_LIMITED` error with `retryAfterMs`.
+  - Slow mode enforcement:
+    - Mirrored `slow_seconds` setting in Redis hash `chan:{channelId}:settings`.
+    - Enforced slow mode for non-moderators using `SET slow:{channelId}:{userId} 1 EX seconds NX`. Rejected messages return `SLOW_MODE` error with remaining TTL.
+    - Updated `PATCH /api/channels/me` to support `slowSeconds` (0-120), persisting to both PostgreSQL and Redis hash.
+    - Added `user.isModFor(channelId)` stub returning `false`.
+  - Reconnect replay:
+    - Updated `chat.join` to accept optional `lastMid`. On reconnect, only messages newer than `lastMid` are retrieved from the recent messages list (`msg.mid > lastMid`).
+    - Updated web `ChatPanel` to record `lastSeenMid`, transmit it on reconnect, and de-duplicate incoming messages by `mid`.
+  - Batch persistence worker (`ChatPersistenceWorker`):
+    - In-memory queue writing messages to PostgreSQL table `chat_messages` in batches (every 1 second or 100 messages, whichever comes first) via multi-row `INSERT ... ON CONFLICT DO NOTHING`.
+    - Resilient delivery: persistence errors never block live chat; worker logs and retries once.
+    - Gracefully flushes remaining queued messages on server shutdown (`onClose` hook).
+  - Chat history cursor pagination:
+    - Implemented `GET /api/channels/:id/chat/history?before=<mid>&limit=50` querying `chat_messages` joined with `users`, returning messages before the specified ULID cursor in chronological order.
+  - Web UI improvements:
+    - Displays inline system notices in the chat stream for `RATE_LIMITED` and `SLOW_MODE`.
+    - Temporarily disables the chat input and displays a visible live countdown badge (e.g. "Slow mode: wait 10s...") until the cooldown expires.
+    - Added Slow Mode input control (0-120s) to Channel Settings (`/settings`).
+  - Added 5 comprehensive Vitest integration tests in `apps/server/src/chat/task8.integration.test.ts` covering 21st message rejection, slow mode blocking & expiration, replay by `lastMid`, batch persistence flush triggers (count and timer), and cursor pagination. All 39 tests pass.
 
 ## Decisions
+- **Non-blocking Chat Persistence**: Chat message delivery remains sub-millisecond over WebSocket and Redis pub/sub. Database persistence is performed asynchronously by a decoupled in-memory batch worker (`ChatPersistenceWorker`), isolating PostgreSQL write latency from the chat hot path.
+- **ULID-based Reconnect Replay & History Pagination**: Reconnect replay and REST history pagination exploit ULID lexicographical sorting (`msg.mid > lastMid` and `chatMessages.id < before`), guaranteeing strict chronological message ordering across reconnects.
+- **Slow Mode Redis Invalidation**: Channel `slowSeconds` is cached in Redis hash `chan:{channelId}:settings`. Any update via `PATCH /api/channels/me` updates both Postgres and Redis atomically, ensuring instantaneous enforcement without stale read windows.
 - **Pre-serialized Chat Delivery**: `chat.send` pre-serializes the server push envelope once and publishes it to Redis. Gateways deliver the exact string directly to local sockets via `broadcastRawToRoom` without deserialization overhead, skipping slow connections whose `bufferedAmount > 1 MB`.
 - **Dynamic Redis Pub/Sub Lifecycle**: The server subscribes to `chat:{channelId}` only when the first local client joins the room and unsubscribes immediately when the last local client leaves or disconnects, conserving Redis resources.
 - **Strict Plain Text Rendering**: React text nodes are used exclusively in `ChatPanel` so user chat text is never parsed as HTML or markdown, preventing XSS.
@@ -221,6 +245,22 @@
    - In Browser 1, send multiple messages.
    - Scroll up in the chat window. Send another message.
    - Confirm auto-scrolling pauses and a floating button `"More messages below"` appears. Clicking it smoothly scrolls down to the bottom and clears the unread indicator.
+
+### Task 8 Manual Verification Steps
+
+1. **Configure Slow Mode**:
+   - Log in and navigate to `http://localhost:5173/settings`.
+   - In the **Slow Mode** input field, enter `10` seconds and click **Save Changes**.
+   - Confirm the success toast notification appears.
+2. **Observe Slow Mode Cooldown & Countdown**:
+   - Navigate to your channel page (`http://localhost:5173/c/<your_username>`).
+   - Type a chat message and press Enter. The message posts immediately.
+   - Immediately attempt to send another message.
+   - Observe the error handling:
+     - An inline system notice appears in the chat stream: `[System]: Slow mode is active. Please wait 10s before sending another message.`
+     - The input placeholder changes to `Slow mode: wait 10s...` and becomes disabled.
+     - A live countdown badge appears beside the Send button counting down: `10s`, `9s`, `8s` ... until `0s`.
+     - When the countdown reaches 0, the input unlocks and allows sending the next message.
 
 ### Happy Path curl Examples
 

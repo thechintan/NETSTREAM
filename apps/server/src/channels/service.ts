@@ -15,6 +15,7 @@ import {
   streams,
   users,
 } from '../db/index.js';
+import { redis } from '../lib/redis.js';
 
 export async function getCategories(): Promise<CategoryDto[]> {
   const result = await db
@@ -136,12 +137,19 @@ export async function updateMyChannel(
   if (input.categoryId !== undefined) {
     updateValues.categoryId = input.categoryId;
   }
+  if (input.slowSeconds !== undefined) {
+    updateValues.slowSeconds = input.slowSeconds;
+  }
 
   if (Object.keys(updateValues).length > 0) {
     await db
       .update(channels)
       .set(updateValues)
       .where(eq(channels.id, channel.id));
+  }
+
+  if (input.slowSeconds !== undefined) {
+    await redis.hset(`chan:${channel.id}:settings`, 'slow_seconds', input.slowSeconds.toString());
   }
 
   const updatedDetail = await getChannelByName(channel.name, ownerId);
@@ -364,4 +372,20 @@ export async function getLiveChannels(filters?: {
     viewerCount: 0, // Filled in by later task
     startedAt: row.startedAt,
   }));
+}
+
+export async function getChannelSlowSeconds(channelId: string): Promise<number> {
+  const cached = await redis.hget(`chan:${channelId}:settings`, 'slow_seconds');
+  if (cached !== null) {
+    return parseInt(cached, 10) || 0;
+  }
+
+  const [row] = await db
+    .select({ slowSeconds: channels.slowSeconds })
+    .from(channels)
+    .where(eq(channels.id, channelId));
+
+  const seconds = row?.slowSeconds ?? 0;
+  await redis.hset(`chan:${channelId}:settings`, 'slow_seconds', seconds.toString());
+  return seconds;
 }

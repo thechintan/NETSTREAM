@@ -1,13 +1,20 @@
 import { ChatJoinResponse } from '@netstream/shared';
-import { redisSub } from '../lib/redis.js';
+import { redis, redisSub } from '../lib/redis.js';
 import { Conn } from '../realtime/conn.js';
 import { WebSocketGateway } from '../realtime/gateway.js';
+import { getChannelSlowSeconds } from '../channels/service.js';
+import { getChatPersistenceWorker } from './persistence.js';
 import {
   formatChatMessage,
   getRecentMessages,
   publishChatMessage,
   stripControlCharacters,
 } from './service.js';
+
+// Moderator check stub for Task 8 (moderators are added in Task 9)
+export function isModFor(_userId: string, _channelId: string): boolean {
+  return false;
+}
 
 export function registerChatHandlers(gateway: WebSocketGateway): void {
   const activeSubscriptions = new Set<string>();
@@ -36,7 +43,7 @@ export function registerChatHandlers(gateway: WebSocketGateway): void {
 
   // chat.join
   gateway.dispatcher.register('chat.join', async (conn: Conn, msg) => {
-    const { channelId } = msg.d;
+    const { channelId, lastMid } = msg.d;
     const room = `chat:${channelId}`;
 
     gateway.joinRoom(conn, room);
@@ -48,8 +55,8 @@ export function registerChatHandlers(gateway: WebSocketGateway): void {
       await redisSub.subscribe(room);
     }
 
-    // Retrieve last 50 messages from Redis recent list
-    const messages = await getRecentMessages(channelId, 50);
+    // Retrieve messages from Redis (filtered by lastMid if provided)
+    const messages = await getRecentMessages(channelId, 50, lastMid);
     return { messages } satisfies ChatJoinResponse;
   });
 
@@ -85,11 +92,52 @@ export function registerChatHandlers(gateway: WebSocketGateway): void {
       return;
     }
 
-    // 2. Format message with ULID and deterministic color
+    // 2. Per-user per-channel rate limit: 20 messages per 30 seconds
+    const rateKey = `ratelimit:chat:${channelId}:${conn.user.id}`;
+    const count = await redis.incr(rateKey);
+    if (count === 1) {
+      await redis.expire(rateKey, 30);
+    }
+    if (count > 20) {
+      const ttl = await redis.ttl(rateKey);
+      const retryAfterMs = Math.max(1000, ttl * 1000);
+      conn.fail(
+        msg.id,
+        'RATE_LIMITED',
+        'You are sending messages too quickly. Please wait.',
+        retryAfterMs
+      );
+      return;
+    }
+
+    // 3. Slow mode enforcement for non-moderators
+    if (!isModFor(conn.user.id, channelId)) {
+      const slowSeconds = await getChannelSlowSeconds(channelId);
+      if (slowSeconds > 0) {
+        const slowKey = `slow:${channelId}:${conn.user.id}`;
+        const setResult = await redis.set(slowKey, '1', 'EX', slowSeconds, 'NX');
+        if (setResult !== 'OK') {
+          const remainingTtl = await redis.ttl(slowKey);
+          const retryAfterMs = Math.max(1000, remainingTtl * 1000);
+          conn.fail(
+            msg.id,
+            'SLOW_MODE',
+            `Slow mode is active. Please wait ${remainingTtl}s before sending another message.`,
+            retryAfterMs
+          );
+          return;
+        }
+      }
+    }
+
+    // 4. Format message with ULID and deterministic color
     const chatMsg = formatChatMessage(channelId, conn.user, sanitized);
 
-    // 3. Publish to Redis & recent list (delivered via Redis pub/sub)
+    // 5. Publish to Redis & recent list (delivered via Redis pub/sub)
     await publishChatMessage(chatMsg);
+
+    // 6. Enqueue for database batch persistence
+    getChatPersistenceWorker().enqueue(chatMsg);
 
     return { ok: true, mid: chatMsg.mid };
   });

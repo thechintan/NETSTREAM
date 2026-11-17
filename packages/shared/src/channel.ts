@@ -29,9 +29,22 @@ export const updateChannelSchema = z.object({
     .max(100, 'Title cannot exceed 100 characters')
     .optional(),
   categoryId: z.string().uuid('Invalid category ID').nullable().optional(),
+  slowSeconds: z
+    .number()
+    .int()
+    .min(0, 'Slow mode seconds cannot be negative')
+    .max(120, 'Slow mode seconds cannot exceed 120')
+    .optional(),
 });
 
 export type UpdateChannelInput = z.infer<typeof updateChannelSchema>;
+
+export const chatHistoryQuerySchema = z.object({
+  before: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+export type ChatHistoryQuery = z.infer<typeof chatHistoryQuerySchema>;
 
 export const rotateStreamKeyResponseSchema = z.object({
   streamKey: z.string(),

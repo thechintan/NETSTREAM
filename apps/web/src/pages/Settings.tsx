@@ -14,6 +14,7 @@ export const Settings: React.FC = () => {
   const [categories, setCategories] = useState<CategoryDto[]>([]);
   const [title, setTitle] = useState(channel?.title || '');
   const [categoryId, setCategoryId] = useState(channel?.categoryId || '');
+  const [slowSeconds, setSlowSeconds] = useState(channel?.slowSeconds ?? 0);
   const [isLoadingCategories, setIsLoadingCategories] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isRotating, setIsRotating] = useState(false);
@@ -26,6 +27,7 @@ export const Settings: React.FC = () => {
     if (channel) {
       setTitle(channel.title || '');
       setCategoryId(channel.categoryId || '');
+      setSlowSeconds(channel.slowSeconds ?? 0);
     }
   }, [channel]);
 
@@ -66,6 +68,7 @@ export const Settings: React.FC = () => {
       await api.patch<ChannelDto>('/api/channels/me', {
         title: title.trim(),
         categoryId: categoryId || null,
+        slowSeconds: Number(slowSeconds) || 0,
       });
       await refreshUser();
       showToast('Channel updated successfully', 'success');
@@ -157,6 +160,24 @@ export const Settings: React.FC = () => {
                 </option>
               ))}
             </select>
+          </div>
+
+          <div>
+            <label htmlFor="slowSeconds" className="block text-xs font-semibold text-gray-300 uppercase tracking-wider mb-2">
+              Slow Mode (0 - 120 seconds)
+            </label>
+            <input
+              id="slowSeconds"
+              type="number"
+              min={0}
+              max={120}
+              value={slowSeconds}
+              onChange={(e) => setSlowSeconds(Math.max(0, Math.min(120, parseInt(e.target.value, 10) || 0)))}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Limits chat participants to sending at most one message per interval. Set to 0 to disable slow mode.
+            </p>
           </div>
 
           <div className="flex justify-end pt-2">

@@ -17,6 +17,7 @@ export type WsErrorCode =
   | 'FORBIDDEN'
   | 'NOT_FOUND'
   | 'RATE_LIMITED'
+  | 'SLOW_MODE'
   | 'INTERNAL_ERROR'
   | 'TIMEOUT'
   | 'UNKNOWN_TYPE';
@@ -33,6 +34,7 @@ export type WsEnvelope = z.infer<typeof wsEnvelopeSchema>;
 // Real payload schemas for chat.*
 export const chatJoinPayloadSchema = z.object({
   channelId: z.string().uuid(),
+  lastMid: z.string().optional(),
 });
 
 export const chatLeavePayloadSchema = z.object({

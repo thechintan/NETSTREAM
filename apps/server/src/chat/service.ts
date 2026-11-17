@@ -1,8 +1,11 @@
+import { and, desc, eq, lt } from 'drizzle-orm';
 import { ulid } from 'ulid';
 import {
   ChatMessageDto,
   getUserColor,
 } from '@netstream/shared';
+import { db } from '../db/index.js';
+import { chatMessages, users } from '../db/schema.js';
 import { redis } from '../lib/redis.js';
 import { ConnUser } from '../realtime/conn.js';
 
@@ -55,10 +58,11 @@ export async function publishChatMessage(message: ChatMessageDto): Promise<strin
 
 export async function getRecentMessages(
   channelId: string,
-  limit = 50
+  limit = 50,
+  lastMid?: string
 ): Promise<ChatMessageDto[]> {
   const recentKey = `chat:recent:${channelId}`;
-  const rawList = await redis.lrange(recentKey, 0, limit - 1);
+  const rawList = await redis.lrange(recentKey, 0, 99);
 
   const messages: ChatMessageDto[] = [];
   for (const raw of rawList) {
@@ -70,5 +74,52 @@ export async function getRecentMessages(
   }
 
   // Reverse so the array is in chronological order (oldest -> newest)
-  return messages.reverse();
+  messages.reverse();
+
+  // If lastMid is provided, return only messages newer than lastMid
+  if (lastMid) {
+    return messages.filter((m) => m.mid > lastMid);
+  }
+
+  return messages.slice(-limit);
+}
+
+export async function getPersistedChatHistory(
+  channelId: string,
+  before?: string,
+  limit = 50
+): Promise<ChatMessageDto[]> {
+  const conditions = [eq(chatMessages.channelId, channelId)];
+  if (before) {
+    conditions.push(lt(chatMessages.id, before));
+  }
+
+  const rows = await db
+    .select({
+      id: chatMessages.id,
+      channelId: chatMessages.channelId,
+      text: chatMessages.text,
+      createdAt: chatMessages.createdAt,
+      userId: users.id,
+      username: users.username,
+    })
+    .from(chatMessages)
+    .innerJoin(users, eq(chatMessages.userId, users.id))
+    .where(and(...conditions))
+    .orderBy(desc(chatMessages.id))
+    .limit(limit);
+
+  // Return mapped messages sorted chronologically (oldest -> newest)
+  return rows.reverse().map((r) => ({
+    mid: r.id,
+    channelId: r.channelId,
+    user: {
+      id: r.userId,
+      name: r.username,
+      color: getUserColor(r.username),
+      badges: [],
+    },
+    text: r.text,
+    ts: r.createdAt.getTime(),
+  }));
 }

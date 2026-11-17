@@ -18,6 +18,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ channelId, channelName }) 
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [cooldownSeconds, setCooldownSeconds] = useState(0);
+  const [cooldownReason, setCooldownReason] = useState<'RATE_LIMITED' | 'SLOW_MODE' | null>(null);
+
+  const lastSeenMidRef = useRef<string | undefined>(undefined);
 
   // Auto-scroll control
   const listRef = useRef<HTMLDivElement>(null);
@@ -38,7 +42,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ channelId, channelName }) 
   const handleScroll = () => {
     if (!listRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = listRef.current;
-    // Consider at bottom if within 50px
     const atBottom = scrollHeight - scrollTop - clientHeight < 50;
     setIsAtBottom(atBottom);
     if (atBottom) {
@@ -46,15 +49,44 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ channelId, channelName }) 
     }
   };
 
+  // Cooldown countdown timer
+  useEffect(() => {
+    if (cooldownSeconds <= 0) {
+      setCooldownReason(null);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setCooldownSeconds((prev) => (prev > 1 ? prev - 1 : 0));
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [cooldownSeconds]);
+
   // Join channel chat on mount, leave on unmount, and resubscribe on reconnect
   useEffect(() => {
     let isMounted = true;
 
-    async function joinChat() {
+    async function joinChat(lastMid?: string) {
       try {
-        const res = await request<ChatJoinResponse>('chat.join', { channelId });
+        const res = await request<ChatJoinResponse>('chat.join', {
+          channelId,
+          lastMid,
+        });
+
         if (isMounted && res?.messages) {
-          setMessages(res.messages.slice(-150));
+          setMessages((prev) => {
+            const seen = new Set(prev.map((m) => m.mid));
+            const newMsgs = res.messages.filter((m) => !seen.has(m.mid));
+            if (newMsgs.length === 0) return prev;
+
+            const combined = [...prev, ...newMsgs].slice(-150);
+            if (combined.length > 0) {
+              lastSeenMidRef.current = combined[combined.length - 1].mid;
+            }
+            return combined;
+          });
+
           setTimeout(() => scrollToBottom(false), 50);
         }
       } catch {
@@ -66,9 +98,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ channelId, channelName }) 
       void joinChat();
     }
 
-    // Resubscribe on reconnect
+    // Rejoin automatically after a reconnect using last seen mid
     const unsubOpen = client.onOpen(() => {
-      void joinChat();
+      void joinChat(lastSeenMidRef.current);
     });
 
     // Listen for live messages
@@ -76,7 +108,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ channelId, channelName }) 
       if (!isMounted || newMsg.channelId !== channelId) return;
 
       setMessages((prev) => {
-        // Keep only the last 150 messages
+        // De-duplicate by mid
+        if (prev.some((m) => m.mid === newMsg.mid)) return prev;
+        lastSeenMidRef.current = newMsg.mid;
+
         const updated = prev.length >= 150 ? [...prev.slice(1), newMsg] : [...prev, newMsg];
         return updated;
       });
@@ -100,7 +135,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ channelId, channelName }) 
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const textToSend = inputText.trim();
-    if (!textToSend || isSending) return;
+    if (!textToSend || isSending || cooldownSeconds > 0) return;
 
     if (textToSend.length > 500) {
       setSendError('Message exceeds 500 characters');
@@ -115,8 +150,42 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ channelId, channelName }) 
       setInputText('');
       setTimeout(() => scrollToBottom(true), 20);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to send message';
-      setSendError(msg);
+      const errorObj = err as { code?: string; message?: string; retryAfterMs?: number };
+      const code = errorObj?.code;
+      const message = errorObj?.message || 'Failed to send message';
+
+      if (code === 'RATE_LIMITED' || code === 'SLOW_MODE') {
+        const retryMs = errorObj?.retryAfterMs || 3000;
+        const seconds = Math.max(1, Math.ceil(retryMs / 1000));
+        setCooldownSeconds(seconds);
+        setCooldownReason(code);
+
+        // Add inline system notice into chat list
+        const noticeMid = `sys_${Date.now()}`;
+        const noticeText =
+          code === 'SLOW_MODE'
+            ? `Slow mode is active. Please wait ${seconds}s before sending another message.`
+            : `You are sending messages too quickly. Please wait ${seconds}s.`;
+
+        const systemNotice: ChatMessageDto = {
+          mid: noticeMid,
+          channelId,
+          user: {
+            id: 'system',
+            name: 'System',
+            color: '#F59E0B',
+            badges: [],
+          },
+          text: noticeText,
+          ts: Date.now(),
+        };
+
+        setMessages((prev) => [...prev.slice(-149), systemNotice]);
+        setSendError(noticeText);
+        setTimeout(() => scrollToBottom(true), 20);
+      } else {
+        setSendError(message);
+      }
     } finally {
       setIsSending(false);
     }
@@ -161,10 +230,23 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ channelId, channelName }) 
           </div>
         ) : (
           messages.map((msg) => {
+            const isSystem = msg.user.id === 'system';
             const timeStr = new Date(msg.ts).toLocaleTimeString([], {
               hour: '2-digit',
               minute: '2-digit',
             });
+
+            if (isSystem) {
+              return (
+                <div
+                  key={msg.mid}
+                  className="bg-amber-950/40 border border-amber-800/40 rounded px-2.5 py-1.5 text-xs text-amber-300 leading-normal"
+                >
+                  <span className="font-semibold mr-1.5">[System]:</span>
+                  <span>{msg.text}</span>
+                </div>
+              );
+            }
 
             return (
               <div key={msg.mid} className="text-gray-200 text-xs sm:text-sm break-words leading-relaxed group">
@@ -175,7 +257,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ channelId, channelName }) 
                 >
                   {msg.user.name}:
                 </span>
-                {/* Plain text only */}
+                {/* Rendered strictly as plain text */}
                 <span className="text-gray-100">{msg.text}</span>
               </div>
             );
@@ -215,25 +297,39 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ channelId, channelName }) 
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={handleKeyDown}
                 maxLength={500}
-                placeholder="Send a message..."
-                disabled={isSending || status !== 'open'}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 pr-16 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition disabled:opacity-50"
+                placeholder={
+                  cooldownSeconds > 0
+                    ? `${cooldownReason === 'SLOW_MODE' ? 'Slow mode' : 'Rate limit'}: wait ${cooldownSeconds}s...`
+                    : 'Send a message...'
+                }
+                disabled={isSending || status !== 'open' || cooldownSeconds > 0}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 pr-16 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition disabled:opacity-60"
               />
-              <div className="absolute right-1.5">
-                <Button
-                  type="submit"
-                  size="sm"
-                  variant="primary"
-                  disabled={!inputText.trim() || isSending || status !== 'open'}
-                  isLoading={isSending}
-                >
-                  Send
-                </Button>
+              <div className="absolute right-1.5 flex items-center gap-1.5">
+                {cooldownSeconds > 0 ? (
+                  <span className="text-xs font-mono font-semibold text-amber-400 bg-amber-950/80 px-2 py-1 rounded">
+                    {cooldownSeconds}s
+                  </span>
+                ) : (
+                  <Button
+                    type="submit"
+                    size="sm"
+                    variant="primary"
+                    disabled={!inputText.trim() || isSending || status !== 'open'}
+                    isLoading={isSending}
+                  >
+                    Send
+                  </Button>
+                )}
               </div>
             </div>
 
             <div className="flex justify-between items-center px-1 text-[11px] text-gray-500">
-              <span>Press Enter to send</span>
+              {cooldownSeconds > 0 ? (
+                <span className="text-amber-400 font-medium">Cooldown active: please wait {cooldownSeconds}s</span>
+              ) : (
+                <span>Press Enter to send</span>
+              )}
               <span className={inputText.length >= 480 ? 'text-amber-400 font-semibold' : ''}>
                 {inputText.length}/500
               </span>
