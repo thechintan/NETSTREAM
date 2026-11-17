@@ -7,6 +7,7 @@ import { Conn, ConnUser } from './conn.js';
 import { Dispatcher } from './dispatcher.js';
 
 export type CleanupHook = (conn: Conn) => void | Promise<void>;
+export type HeartbeatHook = (conn: Conn) => void | Promise<void>;
 
 export interface GatewayOptions {
   allowedOrigin?: string;
@@ -21,6 +22,7 @@ export class WebSocketGateway {
   public readonly conns = new Map<string, Conn>();
   public readonly rooms = new Map<string, Set<Conn>>();
   private cleanupHooks: CleanupHook[] = [];
+  private heartbeatHooks: HeartbeatHook[] = [];
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private readonly allowedOrigin: string;
   private readonly heartbeatIntervalMs: number;
@@ -44,6 +46,13 @@ export class WebSocketGateway {
    */
   public onCleanup(hook: CleanupHook): void {
     this.cleanupHooks.push(hook);
+  }
+
+  /**
+   * Register a heartbeat hook to be executed on each heartbeat interval or pong.
+   */
+  public onHeartbeat(hook: HeartbeatHook): void {
+    this.heartbeatHooks.push(hook);
   }
 
   /**
@@ -112,6 +121,13 @@ export class WebSocketGateway {
     // Heartbeat pong tracking
     ws.on('pong', () => {
       conn.alive = true;
+      for (const hook of this.heartbeatHooks) {
+        try {
+          void hook(conn);
+        } catch {
+          // Ignore error
+        }
+      }
     });
 
     // Inbound messages
@@ -161,6 +177,14 @@ export class WebSocketGateway {
         }
         conn.alive = false;
         conn.ws.ping();
+
+        for (const hook of this.heartbeatHooks) {
+          try {
+            void hook(conn);
+          } catch {
+            // Ignore error
+          }
+        }
       }
     }, this.heartbeatIntervalMs);
 

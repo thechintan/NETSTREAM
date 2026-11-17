@@ -162,8 +162,40 @@
     - Quick Slow Mode adjustment popover in chat header for channel owner and mods (Off, 5s, 10s, 30s, 60s, 120s).
     - Dedicated "Channel Moderators" section in Channel Settings (`/settings`) allowing stream owners to view, add by username, and revoke moderators.
   - Added 7 comprehensive Vitest integration tests in `apps/server/src/moderation/moderation.integration.test.ts` verifying permission matrix across all 4 roles and 6 actions, owner and mod immunity rules, REST endpoints authorization, WebSocket message deletion broadcast, timeout expiry, ban persistence across reconnects, and message badges. All 46 tests pass.
+- Implemented Viewer Counts and Live Directory Updates (TASK 10):
+  - Redis Presence Service (`apps/server/src/presence/service.ts`):
+    - Tracks active viewers using Redis sorted set `viewers:{channelId}` (member = connection id `conn.id`, score = last-seen epoch timestamp in ms).
+    - Multi-tab tracking: distinct browser tabs establish distinct WebSocket connections with unique `conn.id`s, naturally counting each tab as a viewer.
+    - Touch & Refresh: heartbeat ticks update score; explicit `chat.leave` and disconnect cleanup hooks call `removeViewer`.
+    - Stale pruning: `ZREMRANGEBYSCORE viewers:{channelId} 0 (now - 60000)` prunes viewers whose connections failed without clean closure.
+    - Peak tracking: records maximum count seen in Redis key `stream:peak:{channelId}`, exposed via `getPeak` and `getViewerCount`.
+  - Coalesced Aggregation Worker (`PresenceWorker` in `apps/server/src/presence/worker.ts`):
+    - Background interval worker running every 5 seconds (configurable for tests).
+    - Operates across all channels with local viewers: prunes stale records, fetches `ZCARD`, updates Redis peak, and publishes a single coalesced `{ t: 'viewers.count', d: { channelId, count } }` message to Redis channels `chat:{channelId}` and `directory:live`.
+    - Zero broadcast on join/leave: eliminates per-join pub/sub chatter and stampedes.
+  - Directory Room & Event Dispatcher (`apps/server/src/presence/handlers.ts`):
+    - Implemented `user.subscribe { topics: ['live'] }` handler adding connections to local room `directory:live` and wiring Redis subscription to `directory:live`.
+    - Published events: `stream.live` ({ channelId, name, title, category, ownerUsername, viewerCount }), `stream.offline` ({ channelId }), and `viewers.count`.
+    - Exported publisher helpers `publishStreamLive` and `publishStreamOffline`.
+  - REST Endpoints Integration:
+    - Updated `GET /api/live` and `GET /api/channels/:name` to query `getViewerCount(channel.id)` and return real-time viewer counts.
+  - Web Client Integration:
+    - Channel Page (`apps/web/src/pages/Channel.tsx`): subscribes to `viewers.count` event; displays real-time viewer count in both the channel header and video player overlay.
+    - Home Page (`apps/web/src/pages/Home.tsx`): connects to WebSocket on mount, issues `user.subscribe { topics: ['live'] }`, shows live viewer badges on stream cards, dynamically adds/removes stream cards on `stream.live` / `stream.offline`, and smoothly updates viewer counts on `viewers.count` without page reloads.
+  - Added 7 comprehensive Vitest integration tests in `apps/server/src/presence/presence.integration.test.ts` verifying:
+    - Viewer count increments to 2 for two separate connections.
+    - Same user in two tabs counts as 2 viewers.
+    - Pruning of stale viewers older than 60s.
+    - Coalesced periodic broadcast (no per-join broadcast).
+    - Disconnect/cleanup decrementing count.
+    - Directory subscription receiving `stream.live`, `stream.offline`, and `viewers.count`.
+    - REST `/api/live` and `/api/channels/:name` returning accurate real-time viewer counts.
+  - All 9 test files / 53 tests pass across the monorepo; ESLint and TypeScript check pass with zero warnings/errors; Vite production build succeeds.
 
 ## Decisions
+- **Decoupled Viewer Cleanup via Conn.state**: In addition to `conn.rooms`, active viewing channels are tracked in `conn.state.set('viewing:<channelId>', true)`. This guarantees that even if a room-leave hook runs before a presence cleanup hook on socket termination, presence removal and Redis cleanup execute cleanly and reliably.
+- **Strictly Coalesced Viewer Broadcasts**: Zero push messages are broadcast on join or leave. All viewer count updates are batched into a single periodic 5-second tick per channel, completely shielding clients and Redis from connection thrashing during stream spikes.
+- **Multi-Tab Presence via Connection ID**: Redis sorted set members are `conn.id` strings (UUIDs) rather than user IDs. This allows guest viewers, unauthenticated tabs, and multiple tabs by the same logged-in user to each be counted accurately as an active viewer stream.
 - **Target Moderation Immunity Hierarchy**: Channel owners are immune to all moderation actions (ban, timeout). Moderators cannot moderate other moderators or the owner. Any moderation attempt violating this hierarchy returns `FORBIDDEN` ("Cannot moderate the channel owner" or "Moderators cannot moderate other moderators").
 - **Real-Time Cross-Gateway Room Eviction**: When a user is banned via `mod.ban`, the event `user.banned` is broadcast to Redis channel `chat:{channelId}`. Every gateway subscribing to that room evicts any matching local socket connection for that user immediately, preventing any further chat participation without waiting for polling.
 - **Hot-Path Redis Ban Caching**: Banned user checks on the `chat.send` critical path first query the Redis set `bans:{channelId}` (O(1)). On cache miss, it queries PostgreSQL `bans` table; if an active ban is found, it warms the Redis set. Unbans atomically remove the user from both PostgreSQL and the Redis set.
@@ -360,3 +392,17 @@
     ```bash
     curl -s -X GET "http://localhost:3000/api/live?category=Gaming&q=stream"
     ```
+
+### Manual Verification of Viewer Counts & Directory (Task 10)
+
+1. **Start Services & Monorepo**:
+   - Ensure Postgres (port 5433) and Redis (port 6379) are running.
+   - Run `pnpm dev` from the repository root.
+
+2. **Open Three Browser Windows/Tabs**:
+   - **Tab 1**: Navigate to Home (`http://localhost:5173/`). Notice the live channels (if any) and connection status.
+   - **Tab 2**: Navigate to `http://localhost:5173/c/alice`. Notice the viewer counter initially showing `1` viewer.
+   - **Tab 3**: In an incognito window or second tab, navigate to `http://localhost:5173/c/alice`.
+   - **Observe**: Within 5 seconds (the coalescing interval), the viewer badge on both Tab 2 and Tab 3 smoothly updates to `2 viewers`.
+   - **Check Home (Tab 1)**: The stream card for alice reflects `2 viewers` without needing a page refresh.
+   - **Close Tab 3**: Within 5 seconds, the viewer count decrements to `1 viewer` across Tab 2 and Tab 1.

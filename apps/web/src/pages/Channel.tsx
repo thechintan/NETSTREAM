@@ -1,21 +1,24 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChannelDetailDto } from '@netstream/shared';
+import { ChannelDetailDto, ViewersCountPayload } from '@netstream/shared';
 import { Avatar } from '../components/ui/Avatar';
 import { Button } from '../components/ui/Button';
 import { Skeleton } from '../components/ui/Skeleton';
 import { useToast } from '../components/ui/Toast';
 import { ChatPanel } from '../features/chat/ChatPanel';
 import { useAuth } from '../features/auth/AuthContext';
+import { useWs } from '../lib/ws';
 import { api, ApiError } from '../lib/api';
 
 export const Channel: React.FC = () => {
   const { name } = useParams<{ name: string }>();
   const { user } = useAuth();
+  const { client } = useWs();
   const navigate = useNavigate();
   const { showToast } = useToast();
 
   const [channel, setChannel] = useState<ChannelDetailDto | null>(null);
+  const [viewerCount, setViewerCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [followLoading, setFollowLoading] = useState(false);
@@ -31,6 +34,7 @@ export const Channel: React.FC = () => {
         const data = await api.get<ChannelDetailDto>(`/api/channels/${name}`);
         if (isMounted) {
           setChannel(data);
+          setViewerCount(data.viewerCount ?? 0);
         }
       } catch (err) {
         if (isMounted) {
@@ -53,6 +57,23 @@ export const Channel: React.FC = () => {
       isMounted = false;
     };
   }, [name, user]);
+
+  // Listen for real-time viewer count updates
+  useEffect(() => {
+    if (!channel?.id) return;
+    let isMounted = true;
+
+    const unsub = client.on<ViewersCountPayload>('viewers.count', (data) => {
+      if (isMounted && data.channelId === channel.id) {
+        setViewerCount(data.count);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      unsub();
+    };
+  }, [channel?.id, client]);
 
   const handleToggleFollow = async () => {
     if (!user) {
@@ -147,7 +168,7 @@ export const Channel: React.FC = () => {
             <div className="text-center p-6 space-y-3">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-600/20 text-rose-400 border border-rose-500/30 text-xs font-bold uppercase tracking-wider">
                 <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
-                Live Broadcast
+                Live Broadcast &bull; {viewerCount} {viewerCount === 1 ? 'viewer' : 'viewers'}
               </div>
               <h3 className="text-lg font-semibold text-slate-200">
                 WebRTC Video Player Placeholder
@@ -183,8 +204,9 @@ export const Channel: React.FC = () => {
                   {channel.title}
                 </h1>
                 {channel.isLive && (
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 uppercase tracking-wider">
-                    LIVE
+                  <span className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 uppercase tracking-wider">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                    LIVE &bull; {viewerCount} {viewerCount === 1 ? 'viewer' : 'viewers'}
                   </span>
                 )}
               </div>

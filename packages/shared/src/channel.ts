@@ -14,6 +14,7 @@ export const channelDetailDtoSchema = z.object({
   title: z.string(),
   category: categoryDtoSchema.nullable(),
   followerCount: z.number(),
+  viewerCount: z.number().default(0),
   isLive: z.boolean(),
   ownerUsername: z.string(),
   ownerId: z.string().uuid().optional(),

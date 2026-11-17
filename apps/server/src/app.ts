@@ -5,6 +5,7 @@ import { registerAuthRoutes } from './auth/routes.js';
 import { registerChannelRoutes } from './channels/routes.js';
 import { getChatPersistenceWorker, registerChatHandlers } from './chat/index.js';
 import { registerModerationHandlers, registerModerationRoutes } from './moderation/index.js';
+import { initPresenceWorker, registerPresenceHandlers } from './presence/index.js';
 import { config } from './config/index.js';
 import { pingDb } from './db/index.js';
 import { pingRedis } from './lib/redis.js';
@@ -33,6 +34,8 @@ export function buildApp(gatewayOptions?: GatewayOptions): FastifyInstance & { g
   const gateway = new WebSocketGateway(gatewayOptions);
   registerChatHandlers(gateway);
   registerModerationHandlers(gateway);
+  registerPresenceHandlers(gateway);
+  const presenceWorker = initPresenceWorker(gateway);
   app.server.on('upgrade', (req, socket, head) => {
     void gateway.handleUpgrade(req, socket, head);
   });
@@ -40,6 +43,7 @@ export function buildApp(gatewayOptions?: GatewayOptions): FastifyInstance & { g
   app.addHook('onClose', async () => {
     await gateway.close();
     await getChatPersistenceWorker().close();
+    await presenceWorker.close();
   });
 
   // Register cookie support

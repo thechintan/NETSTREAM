@@ -17,6 +17,7 @@ import {
   users,
 } from '../db/index.js';
 import { redis } from '../lib/redis.js';
+import { getViewerCount } from '../presence/service.js';
 
 export async function getCategories(): Promise<CategoryDto[]> {
   const result = await db
@@ -91,6 +92,8 @@ export async function getChannelByName(
     isMod = Boolean(modRecord);
   }
 
+  const viewerCount = await getViewerCount(channelData.id);
+
   return {
     id: channelData.id,
     name: channelData.name,
@@ -103,6 +106,7 @@ export async function getChannelByName(
         }
       : null,
     followerCount,
+    viewerCount,
     isLive: channelData.isLive,
     ownerUsername: channelData.ownerUsername,
     ownerId: channelData.ownerId,
@@ -373,21 +377,23 @@ export async function getLiveChannels(filters?: {
     .where(and(...conditions))
     .orderBy(desc(sql`COALESCE(${streams.startedAt}, ${channels.createdAt})`));
 
-  return results.map((row) => ({
-    id: row.id,
-    name: row.name,
-    title: row.title,
-    category: row.categoryId
-      ? {
-          id: row.categoryId,
-          name: row.categoryName!,
-          thumbnailUrl: row.categoryThumbnailUrl,
-        }
-      : null,
-    ownerUsername: row.ownerUsername,
-    viewerCount: 0, // Filled in by later task
-    startedAt: row.startedAt,
-  }));
+  return await Promise.all(
+    results.map(async (row) => ({
+      id: row.id,
+      name: row.name,
+      title: row.title,
+      category: row.categoryId
+        ? {
+            id: row.categoryId,
+            name: row.categoryName!,
+            thumbnailUrl: row.categoryThumbnailUrl,
+          }
+        : null,
+      ownerUsername: row.ownerUsername,
+      viewerCount: await getViewerCount(row.id),
+      startedAt: row.startedAt,
+    }))
+  );
 }
 
 export async function getChannelSlowSeconds(channelId: string): Promise<number> {

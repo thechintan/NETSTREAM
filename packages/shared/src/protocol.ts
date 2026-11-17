@@ -133,7 +133,41 @@ export const modSlowPayloadSchema = z
 export const userSubscribePayloadSchema = z.object({
   channelId: z.string().uuid().optional(),
   userId: z.string().uuid().optional(),
+  topics: z.array(z.string()).optional(),
 });
+
+export type UserSubscribePayload = z.infer<typeof userSubscribePayloadSchema>;
+
+export const viewersCountPayloadSchema = z.object({
+  channelId: z.string().uuid(),
+  count: z.number().int().min(0),
+});
+
+export type ViewersCountPayload = z.infer<typeof viewersCountPayloadSchema>;
+
+export const streamLivePayloadSchema = z.object({
+  channelId: z.string().uuid(),
+  channelName: z.string().optional(),
+  title: z.string().optional(),
+  category: z
+    .object({
+      id: z.string().uuid(),
+      name: z.string(),
+      thumbnailUrl: z.string().nullable().optional(),
+    })
+    .nullable()
+    .optional(),
+  ownerUsername: z.string().optional(),
+  viewerCount: z.number().int().min(0).optional(),
+});
+
+export type StreamLivePayload = z.infer<typeof streamLivePayloadSchema>;
+
+export const streamOfflinePayloadSchema = z.object({
+  channelId: z.string().uuid(),
+});
+
+export type StreamOfflinePayload = z.infer<typeof streamOfflinePayloadSchema>;
 
 // TODO: Define strict mediasoup types in media task
 export const mediaJoinPayloadSchema = z.any();

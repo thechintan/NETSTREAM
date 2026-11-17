@@ -3,6 +3,8 @@ import { redis, redisSub } from '../lib/redis.js';
 import { Conn } from '../realtime/conn.js';
 import { WebSocketGateway } from '../realtime/gateway.js';
 import { getChannelSlowSeconds } from '../channels/service.js';
+import { addViewer, removeViewer } from '../presence/service.js';
+import { getPresenceWorker } from '../presence/worker.js';
 import {
   getChannelRole,
   getUserTimeout,
@@ -77,6 +79,11 @@ export function registerChatHandlers(gateway: WebSocketGateway): void {
       await redisSub.subscribe(room);
     }
 
+    // Register connection as viewer in presence service
+    await addViewer(channelId, conn.id);
+    conn.state.set(`viewing:${channelId}`, true);
+    getPresenceWorker()?.trackChannel(channelId);
+
     // Retrieve messages from Redis (filtered by lastMid if provided)
     const messages = await getRecentMessages(channelId, 50, lastMid);
     return { messages } satisfies ChatJoinResponse;
@@ -89,6 +96,10 @@ export function registerChatHandlers(gateway: WebSocketGateway): void {
 
     gateway.leaveRoom(conn, room);
     await checkAndUnsubscribe(room);
+
+    // Remove connection as viewer
+    await removeViewer(channelId, conn.id);
+    conn.state.delete(`viewing:${channelId}`);
 
     return { ok: true };
   });
@@ -202,6 +213,9 @@ export function registerChatHandlers(gateway: WebSocketGateway): void {
   gateway.onCleanup(async (conn: Conn) => {
     for (const room of [...conn.rooms]) {
       if (room.startsWith('chat:')) {
+        const channelId = room.slice(5);
+        await removeViewer(channelId, conn.id);
+        conn.state.delete(`viewing:${channelId}`);
         gateway.leaveRoom(conn, room);
         await checkAndUnsubscribe(room);
       }
