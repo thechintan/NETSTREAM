@@ -72,8 +72,53 @@
     - `Settings` (`/settings`): protected channel management with title/category updates and copy-once stream key rotation modal.
     - `NotFound` (`*`): responsive 404 page with return-to-home button.
   - Strict TypeScript compliance, ESLint zero errors/warnings, Vitest 22 tests passing, and Vite production bundle build succeeding cleanly.
+- Implemented WebSocket Gateway (Server) and WsClient (Browser) (TASK 6):
+  - Created `packages/shared/src/protocol.ts` defining:
+    - Message envelope schema and Zod discriminated union for all client-to-server messages (`chat.*`, `mod.*`, `user.subscribe`, `test.echo`, and `media.*` placeholders).
+    - Server-to-client push message types and error codes.
+    - Close codes: 4400 bad message, 4401 unauthorized, 4403 forbidden, 4429 too many messages.
+  - Implemented `apps/server/src/realtime`:
+    - `Conn`: encapsulated connection tracking with `id`, `user` (`{ id, username, guest }`), `alive`, `rooms` Set, per-connection `state` bag, `send(t, d)`, `ack(id, d)`, `fail(id, code, message)`.
+    - `Dispatcher`: handler registry with shared Zod validation, error-to-reply mapping, 4400 close on malformed JSON, unknown type errors, and built-in `test.echo` handler.
+    - Inbound rate limiter: per-connection limit of 50 messages/sec; exceeding closes connection with close code 4429.
+    - `WebSocketGateway`: `WebSocketServer` with `noServer: true` and `maxPayload: 16 KB`.
+    - Upgrade handler: validates `Origin` against `WEB_ORIGIN` (rejects with 403 by destroying socket), redeems one-time ticket via atomic `redeemTicket` (rejects with 401 on missing/invalid/reused ticket).
+    - Heartbeat: pings active connections every 25s (configurable for tests); terminates unresponsive connections.
+    - Cleanup hook registry: modules register callbacks via `onCleanup(conn => ...)` that execute automatically when connections close.
+    - Attached WebSocket gateway upgrade and lifecycle hooks to Fastify app in `apps/server/src/app.ts`.
+  - Implemented `apps/web/src/lib/ws.ts` and `WsContext.tsx`:
+    - `WsClient`: automatic one-time ticket acquisition from `/api/ws-ticket`, `request(t, d)` returning a Promise resolved by matching `ack` or rejected by `error` with a 10s timeout, event subscription via `on(t, handler)`, and `onOpen` hook registry.
+    - Exponential backoff reconnect with full jitter (500ms base, 30s cap) requesting a fresh ticket on each attempt.
+    - React context provider `WsProvider` and `useWs` hook mounted in `App.tsx` with a dev-only floating status badge displaying real-time connection status (`WS: open`, `reconnecting`, etc.).
+  - Added 8 comprehensive Vitest integration tests in `apps/server/src/realtime/gateway.integration.test.ts` with a real `ws` client verifying all gateway behaviors. All 30 tests pass across the entire monorepo.
+- Implemented Live Chat Core, Server and UI (TASK 7):
+  - Updated `packages/shared/src/protocol.ts` with `ChatMessageDto`, `ChatUserDto`, `ChatJoinResponse`, and deterministic `getUserColor` utility.
+  - Implemented server chat module in `apps/server/src/chat`:
+    - `service.ts`: control code stripping, ULID message id generation, deterministic user color assignment, pre-serialized JSON push formatting, Redis recent message storage (`LPUSH` + `LTRIM` to 100), and history retrieval (`getRecentMessages`).
+    - `handlers.ts`:
+      - `chat.join`: joins connection to room `chat:{channelId}`, subscribes to Redis channel `chat:{channelId}` on first local member, replies with last 50 messages from Redis list in chronological order.
+      - `chat.leave`: removes connection from room, unsubscribes from Redis when last local member leaves.
+      - `chat.send`: rejects guests with `FORBIDDEN`, enforces 1-500 character limit, sanitizes control characters, publishes to Redis channel and pushes to recent list.
+      - `broadcastRawToRoom`: broadcasts pre-serialized JSON payload directly to local sockets, skipping overloaded sockets where `bufferedAmount > 1 MB`.
+      - Connection cleanup hook: removes closing connections from all rooms and unregisters Redis subscriptions when rooms become empty.
+    - Wired `registerChatHandlers` in `apps/server/src/app.ts`.
+  - Implemented web chat UI in `apps/web/src/features/chat/ChatPanel.tsx`:
+    - Auto-joins room on mount, leaves on unmount, and automatically resubscribes on socket reconnect.
+    - Displays message history from `chat.join` ack reply.
+    - Ingests live messages, capping memory at the last 150 messages.
+    - Auto-scrolls to bottom, pausing auto-scroll when user scrolls up and displaying a "More messages below" floating pill.
+    - Strict plain-text message rendering (no HTML/script injection vectors).
+    - Chat input with 500-character counter, Enter-to-send shortcut, and a "Log in to chat" prompt for guests.
+    - Integrated `ChatPanel` into `apps/web/src/pages/Channel.tsx`.
+  - Added 4 comprehensive integration tests in `apps/server/src/chat/chat.integration.test.ts` verifying delivery only to matching rooms, guest rejection, history on join, and character length enforcement. All 34 tests pass.
 
 ## Decisions
+- **Pre-serialized Chat Delivery**: `chat.send` pre-serializes the server push envelope once and publishes it to Redis. Gateways deliver the exact string directly to local sockets via `broadcastRawToRoom` without deserialization overhead, skipping slow connections whose `bufferedAmount > 1 MB`.
+- **Dynamic Redis Pub/Sub Lifecycle**: The server subscribes to `chat:{channelId}` only when the first local client joins the room and unsubscribes immediately when the last local client leaves or disconnects, conserving Redis resources.
+- **Strict Plain Text Rendering**: React text nodes are used exclusively in `ChatPanel` so user chat text is never parsed as HTML or markdown, preventing XSS.
+- **WebSocket Upgrade Authentication Flow**: Validates Origin against `WEB_ORIGIN` first (403 on mismatch) before redeeming the ticket atomically from Redis via `redeemTicket` (401 on missing, expired, or previously redeemed tickets), destroying the socket cleanly with HTTP status codes.
+- **WebSocket Close Code Semantics**: Custom close codes strictly align with PROJECT_CONTEXT.md: 4400 (bad JSON), 4401 (unauthorized), 4403 (forbidden), 4429 (rate limit exceeded / too many messages).
+- **Full Jitter Reconnect Algorithm**: Browser `WsClient` reconnects using exponential backoff capped at 30 seconds with full jitter (`random(0, min(30000, 500 * 2^attempt))`) to prevent thundering herd reconnection spikes to the server.
 - **In-memory token security**: In accordance with security best practices and project constraints, access tokens are never saved to `localStorage` or `sessionStorage`. They are stored in module memory in `lib/api.ts`, while session persistence is handled via httpOnly SameSite=Lax refresh cookies.
 - **Concurrent 401 retry deduplication**: `lib/api.ts` deduplicates concurrent token refreshes using a shared promise so multiple parallel requests receiving 401 do not trigger multiple refresh rotations.
 - **Pure Tailwind CSS UI**: Built all interactive components (`Modal`, `Toast`, `Dropdown`, `Avatar`) directly with Tailwind CSS and SVG icons without bloated external component libraries.
@@ -143,6 +188,39 @@
 8. **Verify Sidebar Update**:
    - Inspect the left sidebar.
    - Confirm `alice` is now listed under **Following** with her channel status.
+
+### Task 6 Manual Verification Steps
+
+1. **Automatic Connection**:
+   - Open `http://localhost:5173` in a web browser.
+   - Look at the bottom-left corner: confirm a green status pill appears reading `WS: open` with a steady green dot.
+2. **Ticket Generation & Authentication**:
+   - Open Browser DevTools -> **Network** tab -> filter by **WS** (or `ws`).
+   - Notice the initial request `POST /api/ws-ticket` returning `{ ticket: "..." }`.
+   - Notice the immediate WebSocket upgrade connection to `ws://localhost:5173/ws?ticket=...` with status `101 Switching Protocols`.
+3. **Reconnection on Server Restart**:
+   - Stop or restart the server process.
+   - Observe the web app badge switch to `WS: reconnecting` (with pulsing amber indicator).
+   - Once the server is running again, observe the client fetch a fresh ticket from `/api/ws-ticket` and re-establish the connection, returning to `WS: open`.
+
+### Task 7 Manual Verification Steps
+
+1. **Two-Browser Real-Time Chat**:
+   - Open Browser 1 (logged in as an authenticated user, e.g. `alice` or `streamer1`) and navigate to `http://localhost:5173/c/alice`.
+   - Open Browser 2 in **Incognito/Private window** (as an unauthenticated guest) and navigate to the same URL `http://localhost:5173/c/alice`.
+2. **Guest Restrictions**:
+   - In Browser 2 (Guest), observe the chat input is disabled with a prompt reading `"You must be logged in to participate in chat"` and a `"Log In to Chat"` button.
+3. **Live Chat Ingestion & Display**:
+   - In Browser 1, type `"Hello world from the streamer!"` in the chat box and press Enter.
+   - Confirm the message appears immediately in Browser 1 with the user's deterministic username color, timestamp, and plain text.
+   - Look at Browser 2 (Guest): confirm the message appears in real time without refreshing.
+4. **Chat History on Join**:
+   - Refresh Browser 2 (or open a third tab to `http://localhost:5173/c/alice`).
+   - Confirm the previous message `"Hello world from the streamer!"` is retrieved from Redis history and rendered on mount.
+5. **Scroll Behavior & "More Messages" Pill**:
+   - In Browser 1, send multiple messages.
+   - Scroll up in the chat window. Send another message.
+   - Confirm auto-scrolling pauses and a floating button `"More messages below"` appears. Clicking it smoothly scrolls down to the bottom and clears the unread indicator.
 
 ### Happy Path curl Examples
 

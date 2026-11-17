@@ -18,6 +18,13 @@ redis.on('error', () => {
   // Ignored / logged by monitoring
 });
 
+// Dedicated Redis subscriber instance for pub/sub subscriptions
+export const redisSub = redis.duplicate();
+
+redisSub.on('error', () => {
+  // Suppress unhandled crash on subscriber connection
+});
+
 export async function pingRedis(): Promise<boolean> {
   try {
     const pong = await redis.ping();
@@ -29,6 +36,9 @@ export async function pingRedis(): Promise<boolean> {
 
 export async function closeRedis(): Promise<void> {
   try {
+    if (redisSub.status !== 'end') {
+      redisSub.disconnect();
+    }
     if (redis.status !== 'end') {
       redis.disconnect();
     }

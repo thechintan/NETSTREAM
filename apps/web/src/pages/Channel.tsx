@@ -5,6 +5,7 @@ import { Avatar } from '../components/ui/Avatar';
 import { Button } from '../components/ui/Button';
 import { Skeleton } from '../components/ui/Skeleton';
 import { useToast } from '../components/ui/Toast';
+import { ChatPanel } from '../features/chat/ChatPanel';
 import { useAuth } from '../features/auth/AuthContext';
 import { api, ApiError } from '../lib/api';
 
@@ -228,37 +229,9 @@ export const Channel: React.FC = () => {
         </div>
       </div>
 
-      {/* Right Column: 340px Chat Placeholder (stacks below on mobile) */}
-      <div className="w-full lg:w-[340px] shrink-0">
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl flex flex-col h-[480px] lg:h-[620px] overflow-hidden shadow-xl">
-          <header className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
-              Stream Chat
-            </span>
-            <span className="text-xs text-slate-500 font-medium">Room: #{channel.name}</span>
-          </header>
-
-          <div className="flex-1 p-4 flex flex-col items-center justify-center text-center space-y-2 text-slate-500">
-            <div className="w-10 h-10 rounded-xl bg-slate-800/80 flex items-center justify-center text-slate-400">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-              </svg>
-            </div>
-            <p className="text-xs font-medium text-slate-300">Welcome to the stream chat!</p>
-            <p className="text-[11px] text-slate-400 max-w-[220px]">
-              Real-time chat messages and moderation will be connected via WebSockets in a future task.
-            </p>
-          </div>
-
-          <div className="p-3 border-t border-slate-800 bg-slate-950/40">
-            <input
-              type="text"
-              placeholder="Send a chat message..."
-              disabled
-              className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-400 cursor-not-allowed opacity-60"
-            />
-          </div>
-        </div>
+      {/* Right Column: 340px Chat Panel (stacks below on mobile) */}
+      <div className="w-full lg:w-[340px] shrink-0 h-[500px] lg:h-[620px]">
+        <ChatPanel channelId={channel.id} channelName={channel.name} />
       </div>
     </div>
   );

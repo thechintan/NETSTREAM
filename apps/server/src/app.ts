@@ -3,6 +3,7 @@ import Fastify, { FastifyInstance } from 'fastify';
 import { VERSION } from '@netstream/shared';
 import { registerAuthRoutes } from './auth/routes.js';
 import { registerChannelRoutes } from './channels/routes.js';
+import { registerChatHandlers } from './chat/index.js';
 import { config } from './config/index.js';
 import { pingDb } from './db/index.js';
 import { pingRedis } from './lib/redis.js';
@@ -29,6 +30,7 @@ export function buildApp(gatewayOptions?: GatewayOptions): FastifyInstance & { g
 
   // Attach WebSocket gateway
   const gateway = new WebSocketGateway(gatewayOptions);
+  registerChatHandlers(gateway);
   app.server.on('upgrade', (req, socket, head) => {
     void gateway.handleUpgrade(req, socket, head);
   });

@@ -44,6 +44,48 @@ export const chatSendPayloadSchema = z.object({
   text: z.string().trim().min(1, 'Message cannot be empty').max(500, 'Message cannot exceed 500 characters'),
 });
 
+export const chatUserDtoSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  color: z.string(),
+  badges: z.array(z.string()).default([]),
+});
+
+export type ChatUserDto = z.infer<typeof chatUserDtoSchema>;
+
+export const chatMessageDtoSchema = z.object({
+  mid: z.string(),
+  channelId: z.string().uuid(),
+  user: chatUserDtoSchema,
+  text: z.string(),
+  ts: z.number(),
+});
+
+export type ChatMessageDto = z.infer<typeof chatMessageDtoSchema>;
+
+export const chatJoinResponseSchema = z.object({
+  messages: z.array(chatMessageDtoSchema),
+});
+
+export type ChatJoinResponse = z.infer<typeof chatJoinResponseSchema>;
+
+const CHAT_COLORS = [
+  '#FF5252', '#FF4081', '#E040FB', '#7C4DFF',
+  '#536DFE', '#448AFF', '#00E5FF', '#1DE9B6',
+  '#00E676', '#76FF03', '#C6FF00', '#FFEA00',
+  '#FFC400', '#FF9100', '#FF3D00', '#F50057',
+];
+
+export function getUserColor(username: string): string {
+  let hash = 0;
+  for (let i = 0; i < username.length; i++) {
+    hash = (hash << 5) - hash + username.charCodeAt(i);
+    hash |= 0;
+  }
+  const index = Math.abs(hash) % CHAT_COLORS.length;
+  return CHAT_COLORS[index];
+}
+
 // Real payload schemas for mod.*
 export const modBanPayloadSchema = z.object({
   channelId: z.string().uuid(),

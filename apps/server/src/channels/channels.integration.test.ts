@@ -10,13 +10,17 @@ import {
   streams,
 } from '../db/index.js';
 import { runMigrations } from '../db/migrate.js';
-import { closeRedis } from '../lib/redis.js';
+import { closeRedis, redis } from '../lib/redis.js';
 
 describe('Channel, Category and Follow REST Endpoints', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
     await runMigrations();
+    const rlKeys = await redis.keys('ratelimit:*');
+    if (rlKeys.length > 0) {
+      await redis.del(...rlKeys);
+    }
     app = buildApp();
     await app.ready();
   });

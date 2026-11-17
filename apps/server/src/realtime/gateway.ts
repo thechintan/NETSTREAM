@@ -123,18 +123,18 @@ export class WebSocketGateway {
     const handleClose = async () => {
       this.conns.delete(conn.id);
 
-      // Leave all rooms
-      for (const room of conn.rooms) {
-        this.leaveRoom(conn, room);
-      }
-
-      // Run cleanup hooks
+      // Run cleanup hooks first so modules can inspect conn.rooms and clean up state
       for (const hook of this.cleanupHooks) {
         try {
           await hook(conn);
         } catch {
           // Ignore errors in cleanup hooks to prevent crashing other hooks
         }
+      }
+
+      // Leave all remaining rooms
+      for (const room of [...conn.rooms]) {
+        this.leaveRoom(conn, room);
       }
     };
 
@@ -207,9 +207,39 @@ export class WebSocketGateway {
     const set = this.rooms.get(room);
     if (!set) return;
 
+    const maxBuffered = 1024 * 1024; // 1 MB
     for (const conn of set) {
       if (excludeConnId && conn.id === excludeConnId) continue;
-      conn.send(t, d);
+      if (conn.ws.readyState === conn.ws.OPEN) {
+        if (conn.ws.bufferedAmount > maxBuffered) {
+          continue;
+        }
+        conn.send(t, d);
+      }
+    }
+  }
+
+  /**
+   * Broadcast a pre-serialized raw JSON string directly to all members in a room,
+   * skipping any socket whose bufferedAmount exceeds 1 MB.
+   */
+  public broadcastRawToRoom(
+    room: string,
+    rawJson: string,
+    excludeConnId?: string
+  ): void {
+    const set = this.rooms.get(room);
+    if (!set) return;
+
+    const maxBuffered = 1024 * 1024; // 1 MB
+    for (const conn of set) {
+      if (excludeConnId && conn.id === excludeConnId) continue;
+      if (conn.ws.readyState === conn.ws.OPEN) {
+        if (conn.ws.bufferedAmount > maxBuffered) {
+          continue;
+        }
+        conn.ws.send(rawJson);
+      }
     }
   }
 

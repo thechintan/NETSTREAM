@@ -4,8 +4,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { WS_CLOSE_CODES } from '@netstream/shared';
 import { buildApp } from '../app.js';
 import { config } from '../config/index.js';
-import { closeDb } from '../db/index.js';
-import { closeRedis } from '../lib/redis.js';
 import { createWsTicket } from '../auth/ticket.js';
 
 describe('WebSocket Gateway Integration Tests', () => {
@@ -25,8 +23,6 @@ describe('WebSocket Gateway Integration Tests', () => {
 
   afterAll(async () => {
     await app.close();
-    await closeDb();
-    await closeRedis();
   });
 
   it('1. rejects invalid ticket with 401', async () => {
