@@ -9,8 +9,8 @@
     "lint": "eslint .",
     "typecheck": "pnpm -r run typecheck",
     "test": "vitest run",
-    "db:migrate": "echo \"[db:migrate] No migrations configured yet\"",
-    "db:seed": "echo \"[db:seed] No seed data configured yet\""
+    "db:migrate": "pnpm --filter @netstream/server db:migrate",
+    "db:seed": "pnpm --filter @netstream/server db:seed"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.0",

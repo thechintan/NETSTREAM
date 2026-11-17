@@ -4,4 +4,5 @@ packages:
 
 allowBuilds:
   '0': esbuild
-  esbuild: true
+  '1': argon2
+  argon2: true
