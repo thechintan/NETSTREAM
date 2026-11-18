@@ -15,6 +15,18 @@ import type {
   StatsReportLike,
 } from './types';
 
+export interface WindowStatsHook {
+  getSnapshot: () => Promise<LiveStatsSnapshot>;
+  latest: LiveStatsSnapshot | null;
+  history: LiveStatsSnapshot[];
+}
+
+declare global {
+  interface Window {
+    __stats?: WindowStatsHook;
+  }
+}
+
 export interface ViewerStatsSource {
   videoReport: StatsReportLike | null;
   audioReport: StatsReportLike | null;
@@ -55,10 +67,46 @@ export const StatsOverlay: React.FC<StatsOverlayProps> = ({
   const activeLayersRef = useRef<ActiveLayersInfo | null>(activeLayers);
   const isRecordingRef = useRef(isRecording);
   const scenarioRef = useRef(scenario);
+  const latestSnapshotRef = useRef<LiveStatsSnapshot | null>(null);
+  const snapshotHistoryRef = useRef<LiveStatsSnapshot[]>([]);
 
   activeLayersRef.current = activeLayers;
   isRecordingRef.current = isRecording;
   scenarioRef.current = scenario;
+
+  const sampleOnce = useCallback(async (): Promise<LiveStatsSnapshot> => {
+    const { videoReport, audioReport, transportReport } = await getStats();
+    const { snapshot: nextSnap, nextPrev } = computeInboundStats({
+      videoReport,
+      audioReport,
+      transportReport,
+      prev: prevSampleRef.current,
+      activeLayers: activeLayersRef.current,
+    });
+    prevSampleRef.current = nextPrev;
+    latestSnapshotRef.current = nextSnap;
+    snapshotHistoryRef.current = [
+      ...snapshotHistoryRef.current.slice(-(HISTORY_LIMIT - 1)),
+      nextSnap,
+    ];
+    return nextSnap;
+  }, [getStats]);
+
+  // Expose window.__stats hook for automated Playwright experiments (viewers.ts)
+  useEffect(() => {
+    window.__stats = {
+      getSnapshot: sampleOnce,
+      get latest() {
+        return latestSnapshotRef.current;
+      },
+      get history() {
+        return snapshotHistoryRef.current;
+      },
+    };
+    return () => {
+      delete window.__stats;
+    };
+  }, [sampleOnce]);
 
   // Poll getStats() every 1 second while overlay is visible or actively recording
   useEffect(() => {
@@ -68,18 +116,9 @@ export const StatsOverlay: React.FC<StatsOverlayProps> = ({
 
     const sample = async () => {
       try {
-        const { videoReport, audioReport, transportReport } = await getStats();
+        const nextSnap = await sampleOnce();
         if (cancelled) return;
 
-        const { snapshot: nextSnap, nextPrev } = computeInboundStats({
-          videoReport,
-          audioReport,
-          transportReport,
-          prev: prevSampleRef.current,
-          activeLayers: activeLayersRef.current,
-        });
-
-        prevSampleRef.current = nextPrev;
         setSnapshot(nextSnap);
 
         setBitrateHistory((prev) => [...prev.slice(-(HISTORY_LIMIT - 1)), nextSnap.bitrateKbps]);
@@ -107,7 +146,7 @@ export const StatsOverlay: React.FC<StatsOverlayProps> = ({
       cancelled = true;
       clearInterval(intervalId);
     };
-  }, [visible, isRecording, getStats]);
+  }, [visible, isRecording, sampleOnce]);
 
   const handleToggleRecording = useCallback(() => {
     if (isRecording) {

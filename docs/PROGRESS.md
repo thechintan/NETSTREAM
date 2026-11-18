@@ -630,5 +630,34 @@
    - TCP: place a test file in `lab/videos`, start `python lab/tcp/server.py`, run `python lab/tcp/client.py list`, `python lab/tcp/client.py get <file>`, and `python lab/tcp/multi_client.py <file> -n 3`; inspect `lab/results/tcp_results.csv`.
    - UDP: run `python lab/udp/run_matrix.py --payload-sizes 256 1024 --counts 500 --sim-drops 0.0 0.05 --runs 2 --ack` and inspect `lab/results/udp_results.csv` (confirm `SIMULATED_*` columns are clearly labelled).
 
+### Verification of Automated Experiment Tooling (Task 26)
+
+1. **Verify Plotting & Netem Scripts**:
+   ```bash
+   python lab/analysis/plot.py
+   python -m pytest lab/experiments/test_netem.py -v
+   python lab/experiments/netem.py --iface eth0 --profile loss-5 --dry-run
+   ```
+   Confirm all 7 PNG graphs are created in `lab/results/graphs/`:
+   - `throughput_vs_loss.png`
+   - `observed_vs_simulated_loss.png`
+   - `rtt_distributions.png`
+   - `webrtc_bitrate_freezes_vs_loss.png`
+   - `simulcast_layers_vs_bandwidth.png`
+   - `chat_latency_vs_clients.png`
+   - `webrtc_vs_hls_latency.png`
+2. **Run Playwright Multi-Viewer Runner**:
+   ```bash
+   pnpm exec tsx lab/experiments/viewers.ts --channel http://localhost:5173/c/streamer -n 3 -t 15 --auto-publish
+   ```
+3. **Run WebSocket Chat Load Benchmark**:
+   ```bash
+   pnpm exec tsx lab/experiments/chat_load.ts -n 100 -m 20 --interval-ms 200
+   ```
+4. **E6 Glass-to-Glass Latency Check**:
+   - In `/studio`, click **Latency Test Mode** (burns large millisecond clock onto feed) and **Go Live**.
+   - Open `/c/<streamer>` and click **Clock** in the player bar.
+   - Take a screenshot of both clocks side-by-side: `Latency = Viewer Epoch Ms - Sender Epoch Ms in frame`.
+
 
 

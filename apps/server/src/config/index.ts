@@ -28,6 +28,10 @@ export const envSchema = z.object({
   RTC_MIN_PORT: z.coerce.number().int().min(1024).max(65535).default(40000),
   RTC_MAX_PORT: z.coerce.number().int().min(1024).max(65535).default(40100),
   MEDIA_WORKERS: z.coerce.number().int().min(1).optional(),
+  MEDIA_FORCE_TCP: z
+    .union([z.boolean(), z.string()])
+    .transform((val) => (typeof val === 'string' ? val.toLowerCase() === 'true' : Boolean(val)))
+    .default(false),
   TURN_HOST: z.string().min(1).default('localhost'),
   TURN_SECRET: z.string().min(1).default('dev_turn_secret'),
   HLS_ENABLED: z

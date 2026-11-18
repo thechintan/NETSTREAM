@@ -4,7 +4,11 @@ import type { CategoryDto } from '@netstream/shared';
 import { useAuth } from '../features/auth/AuthContext';
 import { Button } from '../components/ui/Button';
 import { usePublisher, PublisherStatus } from '../features/studio/usePublisher';
-import { StudioStatsOverlay } from '../features/lab';
+import {
+  StudioStatsOverlay,
+  createLatencyClockStream,
+  type LatencyClockStreamHandle,
+} from '../features/lab';
 import { useWs } from '../lib/WsContext';
 import { api } from '../lib/api';
 
@@ -153,7 +157,51 @@ export const Studio: React.FC = () => {
   const [selectedVideoId, setSelectedVideoId] = useState<string>('');
   const [selectedAudioId, setSelectedAudioId] = useState<string>('');
   const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [latencyTestMode, setLatencyTestMode] = useState(false);
+  const latencyHandleRef = useRef<LatencyClockStreamHandle | null>(null);
   const [permissionError, setPermissionError] = useState<string | null>(null);
+
+  const stopLatencyClock = useCallback(() => {
+    if (latencyHandleRef.current) {
+      latencyHandleRef.current.stop();
+      latencyHandleRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      stopLatencyClock();
+    };
+  }, [stopLatencyClock]);
+
+  const handleToggleLatencyTestMode = useCallback(async () => {
+    if (!stream) return;
+
+    if (latencyTestMode) {
+      stopLatencyClock();
+      setLatencyTestMode(false);
+      if (previewVideoRef.current) {
+        previewVideoRef.current.srcObject = stream;
+      }
+      if (status === 'live') {
+        const rawTrack = stream.getVideoTracks()[0];
+        if (rawTrack) await replaceVideoTrack(rawTrack);
+      }
+      return;
+    }
+
+    stopLatencyClock();
+    const handle = createLatencyClockStream(stream, { width: 1280, height: 720, fps: 30 });
+    latencyHandleRef.current = handle;
+    setLatencyTestMode(true);
+    if (previewVideoRef.current) {
+      previewVideoRef.current.srcObject = handle.stream;
+    }
+    if (status === 'live') {
+      const clockTrack = handle.stream.getVideoTracks()[0];
+      if (clockTrack) await replaceVideoTrack(clockTrack);
+    }
+  }, [stream, latencyTestMode, stopLatencyClock, status, replaceVideoTrack]);
 
   // Enumerate devices helper
   const loadDevices = useCallback(async () => {
@@ -312,7 +360,9 @@ export const Studio: React.FC = () => {
     }
     const saved = await saveStreamInfo();
     if (!saved) return;
-    await startBroadcast(stream, { isScreenShare: isScreenSharing });
+    const publishStream =
+      latencyTestMode && latencyHandleRef.current ? latencyHandleRef.current.stream : stream;
+    await startBroadcast(publishStream, { isScreenShare: isScreenSharing });
   };
 
   const handleEndStream = () => {
@@ -437,6 +487,11 @@ export const Studio: React.FC = () => {
                   Screen Share
                 </span>
               )}
+              {latencyTestMode && (
+                <span className="px-2.5 py-1 bg-sky-600/90 text-white font-medium text-xs rounded-full shadow">
+                  Latency Test Mode (E6)
+                </span>
+              )}
             </div>
 
             {/* Publisher Outbound Network Stats Overlay (toggled via button or 'S' key) */}
@@ -482,6 +537,15 @@ export const Studio: React.FC = () => {
                 title="Toggle outbound WebRTC stats overlay (S)"
               >
                 {statsVisible ? 'Hide Stats' : 'Network Stats (S)'}
+              </Button>
+              <Button
+                variant={latencyTestMode ? 'primary' : 'secondary'}
+                size="sm"
+                onClick={() => void handleToggleLatencyTestMode()}
+                disabled={!stream || status === 'connecting'}
+                title="Burn millisecond wall-clock timestamp onto stream for E6 latency test"
+              >
+                {latencyTestMode ? 'Exit Latency Mode' : 'Latency Test Mode'}
               </Button>
             </div>
 

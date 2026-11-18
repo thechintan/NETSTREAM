@@ -17,9 +17,10 @@ export async function createWebRtcTransport(
 ): Promise<CreateWebRtcTransportResult> {
   const announcedAddress = options?.announcedAddress ?? config.PUBLIC_IP;
   const listenIp = options?.listenIp ?? '0.0.0.0';
-  const enableUdp = options?.enableUdp ?? true;
+  const forceTcp = config.MEDIA_FORCE_TCP;
+  const enableUdp = options?.enableUdp ?? !forceTcp;
   const enableTcp = options?.enableTcp ?? true;
-  const preferUdp = options?.preferUdp ?? true;
+  const preferUdp = options?.preferUdp ?? !forceTcp;
   const initialAvailableOutgoingBitrate =
     options?.initialAvailableOutgoingBitrate ?? 1_000_000;
 

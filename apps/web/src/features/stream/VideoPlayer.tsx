@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Hls from 'hls.js';
 import { Button } from '../../components/ui/Button';
-import { StatsOverlay } from '../lab';
+import { StatsOverlay, formatWallClockMs } from '../lab';
 import { useViewer, type QualityOption } from './useViewer';
 
 export interface VideoPlayerProps {
@@ -37,8 +37,31 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [showControls, setShowControls] = useState(true);
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
   const [statsVisible, setStatsVisible] = useState(false);
+  const [latencyClockVisible, setLatencyClockVisible] = useState(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('latency') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const [viewerClockText, setViewerClockText] = useState(() => formatWallClockMs());
+  const [viewerEpochMs, setViewerEpochMs] = useState(() => Date.now());
   const [resolution, setResolution] = useState<{ width: number; height: number } | null>(null);
   const hideControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // High-frequency viewer wall clock for E6 glass-to-glass latency screenshots
+  useEffect(() => {
+    if (!latencyClockVisible) return;
+    let rafId = 0;
+    const tick = () => {
+      const now = Date.now();
+      setViewerClockText(formatWallClockMs(now));
+      setViewerEpochMs(now);
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [latencyClockVisible]);
 
   // Reset to WebRTC default whenever channelId changes
   useEffect(() => {
@@ -409,6 +432,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </button>
       )}
 
+      {/* Viewer Wall Clock Overlay for Experiment E6 (glass-to-glass delay comparison) */}
+      {latencyClockVisible && (
+        <div className="absolute bottom-16 right-4 z-30 rounded-xl bg-slate-950/90 border-2 border-emerald-400/80 px-4 py-2.5 text-right shadow-2xl backdrop-blur-md">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+            Viewer Clock ({playbackMode === 'webrtc' ? 'WebRTC' : 'HLS'})
+          </div>
+          <div className="text-2xl sm:text-3xl font-mono font-extrabold text-white leading-tight">
+            {viewerClockText}
+          </div>
+          <div className="text-[10px] font-mono text-slate-400">
+            epoch_ms={viewerEpochMs}
+          </div>
+        </div>
+      )}
+
       {/* Prominent "Click to Unmute" banner for autoplay */}
       {isActivelyPlaying && isMuted && (
         <button
@@ -546,6 +584,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               title="Toggle network stats overlay (S)"
             >
               <span>Stats</span>
+            </button>
+
+            {/* Latency Clock Toggle (Experiment E6) */}
+            <button
+              type="button"
+              onClick={() => setLatencyClockVisible((prev) => !prev)}
+              className={`inline-flex items-center gap-1 px-2 py-1 rounded-md border text-xs font-medium transition-colors ${
+                latencyClockVisible
+                  ? 'bg-sky-600/80 border-sky-400/70 text-white'
+                  : 'bg-black/60 hover:bg-slate-800 border-slate-700/70 text-slate-200'
+              }`}
+              title="Toggle viewer millisecond wall clock for glass-to-glass latency test (E6)"
+            >
+              <span>Clock</span>
             </button>
 
             {/* Quality & Compatibility Mode Selector Menu */}
