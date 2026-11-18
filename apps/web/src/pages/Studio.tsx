@@ -4,6 +4,7 @@ import type { CategoryDto } from '@netstream/shared';
 import { useAuth } from '../features/auth/AuthContext';
 import { Button } from '../components/ui/Button';
 import { usePublisher, PublisherStatus } from '../features/studio/usePublisher';
+import { StudioStatsOverlay } from '../features/lab';
 import { useWs } from '../lib/WsContext';
 import { api } from '../lib/api';
 
@@ -20,11 +21,38 @@ export const Studio: React.FC = () => {
     stopBroadcast,
     retryBroadcast,
     replaceVideoTrack,
+    getStats,
   } = usePublisher({
     channelId,
   });
 
   const [liveDuration, setLiveDuration] = useState(0);
+  const [statsVisible, setStatsVisible] = useState(false);
+
+  // Toggle publisher stats overlay with 'S' key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key !== 's' && e.key !== 'S') return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      setStatsVisible((prev) => !prev);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
 
   // Track stream duration while live
   useEffect(() => {
@@ -362,6 +390,13 @@ export const Studio: React.FC = () => {
               )}
             </div>
 
+            {/* Publisher Outbound Network Stats Overlay (toggled via button or 'S' key) */}
+            <StudioStatsOverlay
+              visible={statsVisible}
+              onClose={() => setStatsVisible(false)}
+              getStats={getStats}
+            />
+
             {/* Stream info overlay at bottom of player */}
             <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-4 flex items-end justify-between">
               <div>
@@ -385,6 +420,14 @@ export const Studio: React.FC = () => {
                 disabled={status === 'connecting'}
               >
                 {isScreenSharing ? 'Switch to Camera' : 'Share screen instead'}
+              </Button>
+              <Button
+                variant={statsVisible ? 'primary' : 'secondary'}
+                size="sm"
+                onClick={() => setStatsVisible((prev) => !prev)}
+                title="Toggle outbound WebRTC stats overlay (S)"
+              >
+                {statsVisible ? 'Hide Stats' : 'Network Stats (S)'}
               </Button>
             </div>
 

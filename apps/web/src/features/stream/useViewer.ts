@@ -559,6 +559,34 @@ export function useViewer({ channelId }: UseViewerOptions) {
     };
   }, [channelId, ws.client, connectToStream, consumeProducers, cleanupMedia]);
 
+  const getStats = useCallback(async () => {
+    let videoConsumer: Consumer | null = null;
+    let audioConsumer: Consumer | null = null;
+
+    for (const consumer of consumersRef.current.values()) {
+      if (consumer.closed) continue;
+      if (consumer.kind === 'video' && !videoConsumer) {
+        videoConsumer = consumer;
+      } else if (consumer.kind === 'audio' && !audioConsumer) {
+        audioConsumer = consumer;
+      }
+    }
+
+    const transport = transportRef.current && !transportRef.current.closed ? transportRef.current : null;
+
+    const [videoReport, audioReport, transportReport] = await Promise.all([
+      videoConsumer ? videoConsumer.getStats().catch(() => null) : Promise.resolve(null),
+      audioConsumer ? audioConsumer.getStats().catch(() => null) : Promise.resolve(null),
+      transport ? transport.getStats().catch(() => null) : Promise.resolve(null),
+    ]);
+
+    return {
+      videoReport: videoReport as unknown as import('../lab/types').StatsReportLike | null,
+      audioReport: audioReport as unknown as import('../lab/types').StatsReportLike | null,
+      transportReport: transportReport as unknown as import('../lab/types').StatsReportLike | null,
+    };
+  }, []);
+
   return {
     status,
     error,
@@ -566,6 +594,7 @@ export function useViewer({ channelId }: UseViewerOptions) {
     quality,
     setQuality,
     activeLayers,
+    getStats,
     retry: () => void connectToStream(false),
   };
 }

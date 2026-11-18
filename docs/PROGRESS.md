@@ -544,5 +544,18 @@
    - Verify both sides display the reconnecting state (without destroying the viewer `<video>` element) and automatically recover playback without a page reload.
    - **Observed Recovery Time**: _Record after manual test (expected: ~1-2 s for dev WS drop, ~3-5 s for ICE restart after Wi-Fi restore)._
 
+### Verification of Live Network Statistics Overlay (Task 17)
+
+1. **Run Unit Tests & Typecheck**:
+   ```bash
+   pnpm exec vitest run apps/web/src/features/lab/stats-calculator.test.ts
+   pnpm --filter @netstream/web run typecheck
+   ```
+
+2. **Manual Verification**:
+   - Start a broadcast in Studio (`/studio`), click **Network Stats (S)** (or press `S`), and verify per-`rid` outbound bitrates (`r0`, `r1`, `r2`), `qualityLimitationReason`, retransmitted packets, and available outgoing bitrate update every second.
+   - Open a viewer tab (`/c/<name>`), click **Stats** in the player bar (or press `S`), and verify live metrics and the 60s SVG sparklines (bitrate, loss %, RTT) update every second.
+   - Enter a scenario label (e.g. `loss-5pct-run1`), click **Start**, wait 30 seconds, click **Stop**, then click **CSV** to download and verify all 16 columns in a spreadsheet.
+
 
 

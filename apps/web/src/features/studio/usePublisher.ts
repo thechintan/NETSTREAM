@@ -402,6 +402,25 @@ export function usePublisher({ channelId }: UsePublisherOptions) {
     };
   }, [cleanupTransport]);
 
+  const getStats = useCallback(async () => {
+    const videoProducer =
+      videoProducerRef.current && !videoProducerRef.current.closed
+        ? videoProducerRef.current
+        : null;
+    const transport =
+      transportRef.current && !transportRef.current.closed ? transportRef.current : null;
+
+    const [videoReport, transportReport] = await Promise.all([
+      videoProducer ? videoProducer.getStats().catch(() => null) : Promise.resolve(null),
+      transport ? transport.getStats().catch(() => null) : Promise.resolve(null),
+    ]);
+
+    return {
+      videoReport: videoReport as unknown as import('../lab/types').StatsReportLike | null,
+      transportReport: transportReport as unknown as import('../lab/types').StatsReportLike | null,
+    };
+  }, []);
+
   return {
     status,
     error,
@@ -410,6 +429,7 @@ export function usePublisher({ channelId }: UsePublisherOptions) {
     stopBroadcast,
     retryBroadcast,
     replaceVideoTrack,
+    getStats,
     isLive: status === 'live',
   };
 }

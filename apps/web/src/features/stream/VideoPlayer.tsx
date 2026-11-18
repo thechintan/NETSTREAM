@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Button } from '../../components/ui/Button';
+import { StatsOverlay } from '../lab';
 import { useViewer, type QualityOption } from './useViewer';
 
 export interface VideoPlayerProps {
@@ -13,9 +14,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   channelId,
   channelName = 'Streamer',
 }) => {
-  const { status, error, mediaStream, quality, setQuality, activeLayers, retry } = useViewer({
-    channelId,
-  });
+  const { status, error, mediaStream, quality, setQuality, activeLayers, getStats, retry } =
+    useViewer({
+      channelId,
+    });
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -25,8 +27,34 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
+  const [statsVisible, setStatsVisible] = useState(false);
   const [resolution, setResolution] = useState<{ width: number; height: number } | null>(null);
   const hideControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Toggle stats overlay with 'S' key (ignoring inputs/textareas/selects)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key !== 's' && e.key !== 'S') return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      setStatsVisible((prev) => !prev);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
 
   // Attach MediaStream to HTMLVideoElement without destroying the video element
   useEffect(() => {
@@ -170,6 +198,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }}
       className="relative aspect-video w-full bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex items-center justify-center select-none group"
     >
+      {/* Live WebRTC Network Statistics Overlay (toggled via button or 'S' key) */}
+      <StatsOverlay
+        visible={statsVisible}
+        onClose={() => setStatsVisible(false)}
+        getStats={getStats}
+        activeLayers={activeLayers}
+      />
+
       {/* Persistent Video element (kept mounted through playing & reconnecting) */}
       <video
         ref={videoRef}
@@ -267,8 +303,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             )}
           </div>
 
-          {/* Right: Quality menu, Volume & Fullscreen controls */}
+          {/* Right: Stats toggle, Quality menu, Volume & Fullscreen controls */}
           <div className="flex items-center gap-3 sm:gap-4">
+            {/* Network Stats Overlay Toggle */}
+            <button
+              type="button"
+              onClick={() => setStatsVisible((prev) => !prev)}
+              className={`inline-flex items-center gap-1 px-2 py-1 rounded-md border text-xs font-medium transition-colors ${
+                statsVisible
+                  ? 'bg-emerald-600/80 border-emerald-400/70 text-white'
+                  : 'bg-black/60 hover:bg-slate-800 border-slate-700/70 text-slate-200'
+              }`}
+              title="Toggle network stats overlay (S)"
+            >
+              <span>Stats</span>
+            </button>
+
             {/* Quality Selector Menu */}
             <div className="relative">
               <button
