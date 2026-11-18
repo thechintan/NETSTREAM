@@ -708,6 +708,59 @@
      - Register an account (or browse as guest), open `/c/streamer`, and verify sub-second WebRTC video playback with live chat.
      - *(Reverse flow)*: Stream from the mobile device's camera to the host player; HTTPS guarantees `navigator.mediaDevices.getUserMedia` permissions are granted.
 
+---
+
+### Verification of Test Suite Reliability & CI Pipeline (Task 29)
+
+1. **Run Full Server Vitest Integration Suite**:
+   ```bash
+   pnpm --filter @netstream/server test
+   ```
+   Verifies:
+   - All 21 test files and 117 tests execute sequentially without race conditions (`fileParallelism: false`).
+   - Media signaling, lifecycle, chat persistence, moderation, and ICE configuration tests pass deterministically.
+
+2. **Run Web Vitest Unit Tests**:
+   ```bash
+   pnpm --filter @netstream/web test
+   ```
+   Verifies:
+   - Chat tokenization and custom emotes parsing (5 tests).
+   - WebRTC statistics and moving bitrate calculations (4 tests).
+
+3. **Run Python Lab Test Suite**:
+   ```bash
+   python -m pytest lab/tcp lab/udp lab/experiments -v
+   ```
+   Verifies:
+   - All 14 TCP stream framing, UDP jitter tracking, and network impairment tests pass.
+
+4. **Run End-to-End Playwright Suite**:
+   ```bash
+   pnpm exec playwright test
+   ```
+   Verifies:
+   - User authentication and login flow.
+   - Broadcaster go-live with fake camera and viewer playback verification (`currentTime > 0`, `videoWidth > 0`).
+   - Real-time chat message propagation.
+   - Moderator message deletion.
+   - Stream termination and viewer offline state transition.
+
+---
+
+### Final Documentation & Viva Examination Package (Task 30)
+
+1. **Primary Documentation Index**:
+   - [`README.md`](../README.md): Project overview, feature tier checklist, development and Docker quick start, and troubleshooting.
+   - [`docs/ARCHITECTURE.md`](ARCHITECTURE.md): Comprehensive system architecture with 6 Mermaid diagrams (system, go-live, watch, chat, lifecycle, HLS) and ports/protocols table.
+   - [`docs/PROTOCOL.md`](PROTOCOL.md): WebSocket wire protocol specification (framing, error codes, upstream/downstream message schemas) and full REST endpoint listing.
+   - [`docs/WEBRTC_NOTES.md`](WEBRTC_NOTES.md): WebRTC networking deep dive (ICE-Lite, STUN/TURN, DTLS-SRTP, RTP/RTCP, NACK, PLI/FIR, TWCC, and 3-layer simulcast).
+   - [`docs/LAB.md`](LAB.md): Complete laboratory manual for raw TCP/UDP socket labs, empirical experiments E2–E8, metric definitions, and chart generation.
+   - [`docs/DEMO_SCRIPT.md`](DEMO_SCRIPT.md): Minute-by-minute 7-minute live demonstration script with pre-demo checklist and emergency fallback procedures.
+   - [`docs/VIVA_QA.md`](VIVA_QA.md): 32 exhaustive Computer Networks viva and exam questions and answers referenced directly to repository source files.
+   - [`docs/LIMITATIONS.md`](LIMITATIONS.md): Candid assessment of SFU scaling, in-memory state topology, chat flush durability, and HLS latency tradeoffs.
+
+
 
 
 
