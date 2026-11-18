@@ -27,6 +27,7 @@ export const envSchema = z.object({
   PUBLIC_IP: z.string().min(1).default('127.0.0.1'),
   RTC_MIN_PORT: z.coerce.number().int().min(1024).max(65535).default(40000),
   RTC_MAX_PORT: z.coerce.number().int().min(1024).max(65535).default(40100),
+  MEDIA_WORKERS: z.coerce.number().int().min(1).optional(),
   TURN_HOST: z.string().min(1).default('localhost'),
   TURN_SECRET: z.string().min(1).default('dev_turn_secret'),
   HLS_ENABLED: z

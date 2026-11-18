@@ -6,6 +6,8 @@ import { registerChannelRoutes } from './channels/routes.js';
 import { getChatPersistenceWorker, registerChatHandlers } from './chat/index.js';
 import { registerModerationHandlers, registerModerationRoutes } from './moderation/index.js';
 import { initPresenceWorker, registerPresenceHandlers } from './presence/index.js';
+import { initMedia, shutdownMedia } from './media/index.js';
+import { registerMediaRoutes } from './media/routes.js';
 import { config } from './config/index.js';
 import { pingDb } from './db/index.js';
 import { pingRedis } from './lib/redis.js';
@@ -40,10 +42,15 @@ export function buildApp(gatewayOptions?: GatewayOptions): FastifyInstance & { g
     void gateway.handleUpgrade(req, socket, head);
   });
 
+  app.addHook('onReady', async () => {
+    await initMedia();
+  });
+
   app.addHook('onClose', async () => {
     await gateway.close();
     await getChatPersistenceWorker().close();
     await presenceWorker.close();
+    await shutdownMedia();
   });
 
   // Register cookie support
@@ -59,6 +66,9 @@ export function buildApp(gatewayOptions?: GatewayOptions): FastifyInstance & { g
 
   // Register moderation routes
   registerModerationRoutes(app);
+
+  // Register media routes
+  registerMediaRoutes(app);
 
   // Health check endpoint
   app.get('/api/health', async (_request, reply) => {

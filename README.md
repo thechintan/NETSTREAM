@@ -8,6 +8,11 @@ A Twitch-style live streaming platform for a university Computer Networks projec
 - Node.js 20+
 - pnpm 9+
 - Docker & Docker Compose
+- **Media SFU / mediasoup OS prerequisites**:
+  - Python 3.10+
+  - GNU Make
+  - C++ compiler (Visual Studio MSVC / Clang / GCC)
+  - On Windows: prebuilt binaries are automatically fetched; if building native worker from source, use MSVC or WSL2 (Ubuntu with build-essential).
 
 ### 1. Install dependencies
 ```bash

@@ -191,8 +191,47 @@
     - Directory subscription receiving `stream.live`, `stream.offline`, and `viewers.count`.
     - REST `/api/live` and `/api/channels/:name` returning accurate real-time viewer counts.
   - All 9 test files / 53 tests pass across the monorepo; ESLint and TypeScript check pass with zero warnings/errors; Vite production build succeeds.
+- Implemented mediasoup Foundation (TASK 11):
+  - Installed and pinned `mediasoup@3.15.2` with approved builds in `pnpm-workspace.yaml`. Prebuilt native worker downloaded and verified for Windows x64.
+  - Documented OS prerequisites in `README.md` (Python 3.10+, make, C++ compiler (MSVC/Clang/GCC), WSL2 on Windows).
+  - Media Codecs (`apps/server/src/media/config.ts`): configured router capabilities for audio (Opus, 48kHz, 2 channels) and video (VP8 at 90kHz; H.264 at 90kHz with `packetization-mode: 1`, `profile-level-id: 42e01f`, `level-asymmetry-allowed: 1`).
+  - WorkerPool (`apps/server/src/media/worker-pool.ts`):
+    - Instantiates `max(1, cpuCores - 1)` workers (or configured `MEDIA_WORKERS` env override).
+    - Configured with `rtcMinPort` (40000) and `rtcMaxPort` (40100) from env, and `logLevel: 'warn'`.
+    - Attached `died` event listener logging an error and exiting process (`process.exit(1)`).
+    - Round-robin worker selection via `getNextWorker()`.
+  - RoomManager (`apps/server/src/media/room-manager.ts`):
+    - `getOrCreate(channelId)`: creates a new `Router` on the next worker round-robin with standard codecs; maintains `Room` object `{ router, publisher?: { userId, connId }, producers: Map, viewers: Map, transports: Map }`; reuses existing room if already created.
+    - `close(channelId)`: closes all associated transports and the router, removing the room.
+    - `list()`: returns all active rooms.
+    - `closeAll()`: cleans up all rooms on server shutdown.
+    - Tracks router-to-worker mapping to provide `routerCount` per worker.
+  - WebRTC Transport Helper (`apps/server/src/media/transport.ts`):
+    - Implemented `createWebRtcTransport(room, options)` using mediasoup v3 `listenInfos` API: UDP and TCP enabled, `preferUdp: true`, announced address from `PUBLIC_IP`, and `initialAvailableOutgoingBitrate: 1_000_000`.
+    - Returns `{ transport, params: { id, iceParameters, iceCandidates, dtlsParameters } }` and automatically tracks/cleans up transports on `close` and `routerclose`.
+  - Lifecycle Integration:
+    - Server startup: `initMedia()` initializes WorkerPool and RoomManager during Fastify `onReady` hook and server `start()`.
+    - Graceful shutdown: `shutdownMedia()` closes all rooms and terminates all mediasoup workers during Fastify `onClose` hook and server `gracefulShutdown()`.
+  - Dev-only Debug Endpoint (`apps/server/src/media/routes.ts`):
+    - `GET /api/debug/media`: lists workers (`pid`, `routerCount`, `closed`) and rooms (`channelId`, `producers`, `viewers`, `transports`).
+    - Explicitly disabled (returns 404 Not Found) when `NODE_ENV === 'production'`.
+  - Fixed `.gitignore` rule from `media/` to `/media/` so runtime media recording directories are ignored while server module `apps/server/src/media` remains tracked by Git.
+  - Added 7 comprehensive Vitest integration tests in `apps/server/src/media/media.integration.test.ts` verifying:
+    - WorkerPool initialization with configured options and healthy PIDs.
+    - Room creation and idempotent retrieval.
+    - WebRtcTransport creation with `PUBLIC_IP` and `RTC_MIN_PORT`-`RTC_MAX_PORT` range.
+    - Dev-only `/api/debug/media` output.
+    - `/api/debug/media` returning 404 in production mode.
+    - Clean room closure and transport termination.
+    - Clean worker pool shutdown with zero open handles.
+  - All 10 test files / 60 tests pass across the monorepo; ESLint 0 warnings/errors; TypeScript typecheck passes; Vite production build succeeds.
 
 ## Decisions
+- **Mediasoup Prebuilt Binary Strategy**: Pinned exact version `mediasoup@3.15.2`. On Windows, the npm postinstall script automatically fetches precompiled native worker binaries (`mediasoup-worker-3.15.2-win32-x64.tgz`) from GitHub releases, avoiding external MSVC compilation toolchain failures while supporting full C++ performance.
+- **Root .gitignore Scope**: Updated `.gitignore` to use `/media/` instead of `media/` so that root runtime media directories (`media/hls`, `media/vod`) are excluded from version control without accidentally ignoring the source code folder `apps/server/src/media/`.
+- **Flexible Transport Parameter Returns**: `createWebRtcTransport` returns both `{ transport, params: { id, iceParameters, iceCandidates, dtlsParameters }, clientParams: ... }` and top-level fields (`id`, `iceParameters`, etc.), allowing future signaling handlers in Task 12 to consume either structure cleanly.
+- **Router Count Tracking per Worker**: Tracked router allocations in `RoomManager` via a lightweight router-to-worker map (`Map<routerId, workerPid>`), enabling instant O(1) worker router count reporting on the `/api/debug/media` monitoring endpoint.
+- **Idempotent Media Initialization & Tear-Down**: `initMedia` and `shutdownMedia` use guarded module singletons. Multiple invocations across tests or server startup hooks safely return existing instances or gracefully close workers.
 - **Decoupled Viewer Cleanup via Conn.state**: In addition to `conn.rooms`, active viewing channels are tracked in `conn.state.set('viewing:<channelId>', true)`. This guarantees that even if a room-leave hook runs before a presence cleanup hook on socket termination, presence removal and Redis cleanup execute cleanly and reliably.
 - **Strictly Coalesced Viewer Broadcasts**: Zero push messages are broadcast on join or leave. All viewer count updates are batched into a single periodic 5-second tick per channel, completely shielding clients and Redis from connection thrashing during stream spikes.
 - **Multi-Tab Presence via Connection ID**: Redis sorted set members are `conn.id` strings (UUIDs) rather than user IDs. This allows guest viewers, unauthenticated tabs, and multiple tabs by the same logged-in user to each be counted accurately as an active viewer stream.
@@ -406,3 +445,26 @@
    - **Observe**: Within 5 seconds (the coalescing interval), the viewer badge on both Tab 2 and Tab 3 smoothly updates to `2 viewers`.
    - **Check Home (Tab 1)**: The stream card for alice reflects `2 viewers` without needing a page refresh.
    - **Close Tab 3**: Within 5 seconds, the viewer count decrements to `1 viewer` across Tab 2 and Tab 1.
+
+### Verification of mediasoup Foundation (Task 11)
+
+1. **Run Vitest Integration Tests**:
+   ```bash
+   pnpm --filter @netstream/server exec vitest run src/media/media.integration.test.ts
+   ```
+
+2. **Query Dev-Only Media Debug Endpoint**:
+   ```bash
+   curl -s -X GET http://localhost:3000/api/debug/media
+   ```
+   **Expected Response** (example with worker threads):
+   ```json
+   {
+     "workers": [
+       { "pid": 12345, "routerCount": 0, "closed": false },
+       { "pid": 12346, "routerCount": 0, "closed": false }
+     ],
+     "rooms": []
+   }
+   ```
+   In production (`NODE_ENV=production`), the endpoint returns `404 Not Found`.

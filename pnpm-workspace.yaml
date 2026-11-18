@@ -6,3 +6,4 @@ allowBuilds:
   '0': esbuild
   '1': argon2
   argon2: true
+  mediasoup: true

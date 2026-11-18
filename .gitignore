@@ -20,10 +20,10 @@ npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
 
-# Media files
-media/
-hls/
-vod/
+# Media files (runtime recordings and segments)
+/media/
+/hls/
+/vod/
 
 # OS / Editor
 .DS_Store

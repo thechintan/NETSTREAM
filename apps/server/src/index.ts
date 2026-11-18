@@ -2,6 +2,7 @@ import { buildApp } from './app.js';
 import { config } from './config/index.js';
 import { closeDb } from './db/index.js';
 import { closeRedis } from './lib/redis.js';
+import { initMedia, shutdownMedia } from './media/index.js';
 
 const app = buildApp();
 
@@ -15,6 +16,7 @@ async function gracefulShutdown(signal: string) {
 
   try {
     await app.close();
+    await shutdownMedia();
     await closeRedis();
     await closeDb();
     app.log.info('Graceful shutdown completed successfully.');
@@ -30,6 +32,7 @@ process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
 
 async function start() {
   try {
+    await initMedia();
     await app.listen({ port: config.PORT, host: '0.0.0.0' });
     app.log.info(`Server listening on port ${config.PORT} (origin: ${config.WEB_ORIGIN})`);
   } catch (error) {
