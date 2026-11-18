@@ -569,5 +569,25 @@
    - **Task 19**: Type a partial channel name in the Navbar search, use `ArrowDown`/`ArrowUp` + `Enter` to open the channel by keyboard only; browse `/categories` and `/categories/:id`; verify Studio disables Go Live when title is blank and Home sorts by viewer count with a Following tab.
    - **Task 20**: In channel chat, open the emote picker to insert `:wave:` / `:gg:`, send `@<username>` and an `https://` link, and confirm HTML tags or `javascript:` URLs render strictly as plain text.
 
+### Verification of STUN and TURN (Task 21)
+
+1. **Run Unit & Route Tests**:
+   ```bash
+   pnpm --filter @netstream/server test run src/media/ice-config.test.ts
+   ```
+2. **Start coturn (Docker Compose)**:
+   ```bash
+   docker compose -f infra/docker-compose.yml up -d coturn
+   ```
+   > For LAN demos where mediasoup runs on a private host IP (e.g. `192.168.1.50`), set `PUBLIC_IP=192.168.1.50` in `.env` (or uncomment `allowed-peer-ip` in `infra/coturn.conf`) so coturn permits relay forwarding to the SFU while still blocking all other private/RFC1918 ranges.
+3. **When TURN is Needed vs. mediasoup TCP Candidates**:
+   - **Direct UDP (`host` / `srflx`)**: Works on home/office NATs where outbound UDP to the SFU's `RTC_MIN_PORT–RTC_MAX_PORT` (40000–40100) is permitted.
+   - **mediasoup TCP candidates (`tcp`)**: Sufficient when a firewall blocks UDP entirely, **provided** outbound TCP to the SFU's high media ports (`40000–40100`) is allowed.
+   - **TURN (`relay` over UDP/3478, TCP/3478, or TLS/5349/443)**: Required when clients sit behind **restrictive corporate/campus firewalls** that block all outbound UDP and non-standard TCP ports (allowing only 443/5349/3478 or an HTTP/TLS proxy), or behind **symmetric NAT + strict egress filtering** where direct peer-to-SFU paths cannot be established.
+4. **How to Verify a `relay` Candidate Was Used**:
+   - Start coturn (`docker compose -f infra/docker-compose.yml up -d coturn`), go live in Studio, and open a viewer tab (`/c/<name>`).
+   - Press `S` (or click **Stats**) to open the Network Stats overlay, then check **Force TURN relay (DEV)** (`iceTransportPolicy: 'relay'`).
+   - The player reconnects and plays via coturn; confirm the **Candidate** row in the Stats overlay displays `relay / udp` (or `relay / tcp`).
+
 
 

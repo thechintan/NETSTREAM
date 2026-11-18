@@ -12,6 +12,7 @@ import type {
   MediaCreateTransportResponse,
   MediaRestartIceResponse,
 } from '@netstream/shared';
+import { fetchIceServers, getForceRelay } from '../lab/ice-config';
 import { useWs } from '../../lib/WsContext';
 
 export type PublisherStatus = 'idle' | 'connecting' | 'live' | 'reconnecting' | 'error';
@@ -206,15 +207,18 @@ export function usePublisher({ channelId }: UsePublisherOptions) {
           });
         }
 
-        // 3. Create WebRTC send transport
-        const transportParams = await ws.request<MediaCreateTransportResponse>(
-          'media.createTransport',
-          { direction: 'send' }
-        );
+        // 3. Fetch STUN/TURN ICE servers & create WebRTC send transport
+        const [iceServers, transportParams] = await Promise.all([
+          fetchIceServers(),
+          ws.request<MediaCreateTransportResponse>('media.createTransport', { direction: 'send' }),
+        ]);
 
-        const sendTransport = device.createSendTransport(
-          transportParams as unknown as TransportOptions
-        );
+        const forceRelay = getForceRelay();
+        const sendTransport = device.createSendTransport({
+          ...(transportParams as unknown as TransportOptions),
+          iceServers,
+          iceTransportPolicy: forceRelay ? 'relay' : 'all',
+        });
         transportRef.current = sendTransport;
 
         sendTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {

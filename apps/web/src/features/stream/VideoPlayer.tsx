@@ -204,6 +204,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         onClose={() => setStatsVisible(false)}
         getStats={getStats}
         activeLayers={activeLayers}
+        onRelayPolicyChange={() => {
+          if (status === 'playing' || status === 'connecting' || status === 'reconnecting') {
+            retry();
+          }
+        }}
       />
 
       {/* Persistent Video element (kept mounted through playing & reconnecting) */}

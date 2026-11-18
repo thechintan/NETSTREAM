@@ -444,6 +444,11 @@ export const Studio: React.FC = () => {
               visible={statsVisible}
               onClose={() => setStatsVisible(false)}
               getStats={getStats}
+              onRelayPolicyChange={() => {
+                if (status === 'live') {
+                  void retryBroadcast();
+                }
+              }}
             />
 
             {/* Stream info overlay at bottom of player */}

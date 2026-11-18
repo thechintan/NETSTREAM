@@ -33,3 +33,17 @@ export async function redeemTicket(ticket: string): Promise<WsTicketData | null>
     return null;
   }
 }
+
+/**
+ * Validates a ticket without consuming it (used by GET /api/ice-config for guest ticket holders).
+ */
+export async function peekWsTicket(ticket: string): Promise<WsTicketData | null> {
+  if (!ticket) return null;
+  const raw = await redis.get(`ws:ticket:${ticket}`);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as WsTicketData;
+  } catch {
+    return null;
+  }
+}

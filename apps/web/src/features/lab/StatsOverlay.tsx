@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { getForceRelay, setForceRelay, subscribeForceRelay } from './ice-config';
 import { Sparkline } from './Sparkline';
 import {
   computeInboundStats,
@@ -25,6 +26,7 @@ export interface StatsOverlayProps {
   onClose: () => void;
   getStats: () => Promise<ViewerStatsSource>;
   activeLayers: ActiveLayersInfo | null;
+  onRelayPolicyChange?: (forceRelay: boolean) => void;
 }
 
 const HISTORY_LIMIT = 60;
@@ -34,11 +36,15 @@ export const StatsOverlay: React.FC<StatsOverlayProps> = ({
   onClose,
   getStats,
   activeLayers,
+  onRelayPolicyChange,
 }) => {
   const [snapshot, setSnapshot] = useState<LiveStatsSnapshot | null>(null);
   const [bitrateHistory, setBitrateHistory] = useState<Array<number | null>>([]);
   const [lossHistory, setLossHistory] = useState<Array<number | null>>([]);
   const [rttHistory, setRttHistory] = useState<Array<number | null>>([]);
+  const [forceRelay, setForceRelayState] = useState<boolean>(getForceRelay);
+
+  useEffect(() => subscribeForceRelay(setForceRelayState), []);
 
   // Recorder state
   const [scenario, setScenario] = useState('loss-5pct-run1');
@@ -297,6 +303,32 @@ export const StatsOverlay: React.FC<StatsOverlayProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Dev-only ICE Transport Policy Toggle (TURN Relay testing) */}
+      {import.meta.env.DEV && (
+        <div className="border-t border-slate-800 mt-2 pt-2 flex items-center justify-between gap-2">
+          <label
+            htmlFor="viewer-force-relay"
+            className="text-[11px] text-amber-300 font-medium flex items-center gap-1.5 cursor-pointer select-none"
+          >
+            <input
+              id="viewer-force-relay"
+              type="checkbox"
+              checked={forceRelay}
+              onChange={(e) => {
+                const next = e.target.checked;
+                setForceRelay(next);
+                onRelayPolicyChange?.(next);
+              }}
+              className="rounded border-slate-600 bg-slate-900 text-amber-500 focus:ring-amber-500"
+            />
+            <span>Force TURN relay (DEV)</span>
+          </label>
+          <span className="text-[10px] font-mono text-slate-400">
+            policy: {forceRelay ? 'relay' : 'all'}
+          </span>
+        </div>
+      )}
     </div>
   );
 };

@@ -20,6 +20,7 @@ import type {
   MediaLayersPayload,
   MediaRestartIceResponse,
 } from '@netstream/shared';
+import { fetchIceServers, getForceRelay } from '../lab/ice-config';
 import { useWs } from '../../lib/WsContext';
 
 export type ViewerStatus = 'offline' | 'connecting' | 'playing' | 'reconnecting' | 'failed';
@@ -344,17 +345,20 @@ export function useViewer({ channelId }: UseViewerOptions) {
 
         if (!isMountedRef.current) return;
 
-        // 4. Create WebRTC receive transport
-        const transportParams = await ws.request<MediaCreateTransportResponse>(
-          'media.createTransport',
-          { direction: 'recv' }
-        );
+        // 4. Fetch STUN/TURN ICE servers & create WebRTC receive transport
+        const [iceServers, transportParams] = await Promise.all([
+          fetchIceServers(),
+          ws.request<MediaCreateTransportResponse>('media.createTransport', { direction: 'recv' }),
+        ]);
 
         if (!isMountedRef.current) return;
 
-        const recvTransport = device.createRecvTransport(
-          transportParams as unknown as TransportOptions
-        );
+        const forceRelay = getForceRelay();
+        const recvTransport = device.createRecvTransport({
+          ...(transportParams as unknown as TransportOptions),
+          iceServers,
+          iceTransportPolicy: forceRelay ? 'relay' : 'all',
+        });
         transportRef.current = recvTransport;
 
         recvTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
