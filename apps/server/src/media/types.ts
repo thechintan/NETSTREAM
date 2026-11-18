@@ -56,6 +56,7 @@ export interface ConnMediaState {
   role: 'publisher' | 'viewer';
   transports: Map<string, ConnTransportEntry>;
   producers: Map<string, Producer>;
+  consumers: Map<string, Consumer>;
 }
 
 export interface DebugWorkerInfo {

@@ -6,6 +6,7 @@ import { Button } from '../components/ui/Button';
 import { Skeleton } from '../components/ui/Skeleton';
 import { useToast } from '../components/ui/Toast';
 import { ChatPanel } from '../features/chat/ChatPanel';
+import { VideoPlayer } from '../features/stream';
 import { useAuth } from '../features/auth/AuthContext';
 import { useWs } from '../lib/ws';
 import { api, ApiError } from '../lib/api';
@@ -160,39 +161,10 @@ export const Channel: React.FC = () => {
 
   return (
     <div className="flex flex-col lg:flex-row gap-5">
-      {/* Left Column: 16:9 Video Player Placeholder & Channel Header */}
+      {/* Left Column: 16:9 Video Player & Channel Header */}
       <div className="flex-1 min-w-0 space-y-4">
-        {/* 16:9 Player Placeholder */}
-        <div className="relative aspect-video w-full bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col items-center justify-center group">
-          {channel.isLive ? (
-            <div className="text-center p-6 space-y-3">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-600/20 text-rose-400 border border-rose-500/30 text-xs font-bold uppercase tracking-wider">
-                <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
-                Live Broadcast &bull; {viewerCount} {viewerCount === 1 ? 'viewer' : 'viewers'}
-              </div>
-              <h3 className="text-lg font-semibold text-slate-200">
-                WebRTC Video Player Placeholder
-              </h3>
-              <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                Sub-second mediasoup SFU video stream will be rendered here in a future task.
-              </p>
-            </div>
-          ) : (
-            <div className="text-center p-6 space-y-3">
-              <div className="w-14 h-14 mx-auto rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-600">
-                <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                </svg>
-              </div>
-              <h3 className="text-base font-semibold text-slate-300">
-                {channel.name} is currently offline
-              </h3>
-              <p className="text-xs text-slate-500 max-w-xs mx-auto">
-                Follow this channel to get notified when {channel.name} goes live next.
-              </p>
-            </div>
-          )}
-        </div>
+        {/* 16:9 WebRTC Video Player */}
+        <VideoPlayer channelId={channel.id} channelName={channel.name} />
 
         {/* Channel Header */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">

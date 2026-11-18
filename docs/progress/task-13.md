@@ -1,0 +1,5 @@
+- Built viewer SFU signaling: `media.join` viewer validation with `MEDIA_OFFLINE`, `media.consume` with compatible producer filtering, `media.resume` with keyframe requests, push events (`media.newProducer`, `media.consumerClosed`), and viewer disconnect cleanup.
+- Created `useViewer` hook and `VideoPlayer` component with state machine (`offline`, `connecting`, `playing`, `reconnecting`, `failed`), muted autoplay policy, prominent 'Click to unmute' overlay, volume slider, fullscreen, and LIVE badge; mounted in `Channel.tsx`.
+- Files: `packages/shared/src/protocol.ts`, `apps/server/src/media/handlers.ts`, `types.ts`, `viewer.mock.test.ts`, `apps/web/src/features/stream/*`, `apps/web/src/pages/Channel.tsx`.
+- Decisions: Pause consumers during creation and resume via `media.resume` requesting keyframes for video; auto-reconnect on new producer pushes when recovering from offline.
+- Verification: Ran `pnpm --filter @netstream/server test run src/media/viewer.mock.test.ts` (5/5 tests passed); typechecked all workspaces cleanly.

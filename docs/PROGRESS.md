@@ -486,3 +486,19 @@
    }
    ```
    In production (`NODE_ENV=production`), the endpoint returns `404 Not Found`.
+
+### Verification of Viewer SFU & Player (Task 13)
+
+1. **Run Vitest Unit Tests (with Mocks)**:
+   ```bash
+   pnpm --filter @netstream/server test run src/media/viewer.mock.test.ts
+   ```
+
+2. **Manual End-to-End Verification**:
+   - In Tab A (logged in as streamer), navigate to `http://localhost:5173/studio` and click "Go Live" with camera or screen share enabled.
+   - In Tab B (guest or separate browser profile), navigate to `http://localhost:5173/c/<streamer_name>`.
+   - Observe the player connects via WebRTC and starts playback with the "LIVE" badge and "Click to unmute" button.
+   - Click "Click to unmute" to hear audio, test volume slider and fullscreen toggle.
+   - In Tab A, click "End Stream" or close the tab: Tab B immediately transitions to offline state.
+   - In Tab A, go live again: Tab B recovers and resumes playback without a page reload.
+

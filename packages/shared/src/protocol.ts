@@ -25,7 +25,8 @@ export type WsErrorCode =
   | 'UNKNOWN_TYPE'
   | 'ALREADY_PUBLISHING'
   | 'TOO_MANY_TRANSPORTS'
-  | 'PRODUCER_EXISTS';
+  | 'PRODUCER_EXISTS'
+  | 'MEDIA_OFFLINE';
 
 // Generic envelope schema
 export const wsEnvelopeSchema = z.object({
@@ -218,9 +219,40 @@ export interface MediaProduceResponse {
   id: string;
 }
 
+// Real payload schemas for viewer signaling (Task 13)
+export const mediaConsumePayloadSchema = z.object({
+  transportId: z.string().min(1),
+  rtpCapabilities: z.record(z.unknown()),
+});
+export type MediaConsumePayload = z.infer<typeof mediaConsumePayloadSchema>;
+
+export const mediaResumePayloadSchema = z.object({
+  consumerIds: z.array(z.string().min(1)),
+});
+export type MediaResumePayload = z.infer<typeof mediaResumePayloadSchema>;
+
+export interface ConsumerInfo {
+  id: string;
+  producerId: string;
+  kind: 'audio' | 'video';
+  rtpParameters: unknown;
+}
+export type MediaConsumeResponse = ConsumerInfo[];
+
+export interface MediaResumeResponse {
+  resumed: string[];
+}
+
+export interface MediaNewProducerPayload {
+  producerId: string;
+  kind: 'audio' | 'video';
+}
+
+export interface MediaConsumerClosedPayload {
+  consumerId?: string;
+}
+
 // Viewer signaling placeholders (tightened in later tasks)
-export const mediaConsumePayloadSchema = z.any();
-export const mediaResumePayloadSchema = z.any();
 export const mediaSetLayersPayloadSchema = z.any();
 export const mediaRestartIcePayloadSchema = z.any();
 
