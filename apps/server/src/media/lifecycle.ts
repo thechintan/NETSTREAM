@@ -47,6 +47,15 @@ export function startPublisherSession(
   const existing = channelLifecycles.get(channelId);
 
   if (existing) {
+    if (existing.publisherConnId === connId) {
+      // Idempotent re-join on the same connection
+      if (existing.graceTimer !== null) {
+        clearTimeout(existing.graceTimer);
+        existing.graceTimer = null;
+      }
+      return { reconnected: existing.state === 'LIVE' };
+    }
+
     if (existing.graceTimer !== null && existing.publisherUserId === userId) {
       // Reconnecting within grace period
       clearTimeout(existing.graceTimer);

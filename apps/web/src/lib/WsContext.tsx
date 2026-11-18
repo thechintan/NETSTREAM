@@ -40,9 +40,9 @@ export const WsProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   return (
     <WsContext.Provider value={value}>
       {children}
-      {/* Dev-only status indicator badge */}
+      {/* Dev-only status indicator badge + recovery test trigger */}
       {import.meta.env.DEV && (
-        <div className="fixed bottom-2 left-2 z-50 pointer-events-none">
+        <div className="fixed bottom-2 left-2 z-50 flex items-center gap-1.5">
           <div
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono font-medium shadow-md border backdrop-blur-sm ${
               status === 'open'
@@ -66,6 +66,16 @@ export const WsProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               }`}
             />
             <span>WS: {status}</span>
+            {status === 'open' && (
+              <button
+                type="button"
+                onClick={() => client.simulateDisconnect()}
+                title="Simulate WebSocket disconnect to test recovery"
+                className="ml-1 px-1.5 py-0.5 rounded bg-rose-900/70 hover:bg-rose-700 text-rose-200 border border-rose-600/50 text-[10px] font-sans transition-colors cursor-pointer"
+              >
+                Drop WS
+              </button>
+            )}
           </div>
         </div>
       )}

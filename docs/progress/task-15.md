@@ -1,0 +1,5 @@
+- Added 3-layer simulcast publishing (`r0`/`r1`/`r2`, `L1T3`, `videoGoogleStartBitrate: 1000`) with single-layer fallback notice for camera, and 3.5 Mbps `contentHint: 'detail'` encoding for screen share.
+- Added `media.setLayers` handler with viewer ownership/kind/Zod validation and forwarded consumer `layerschange` events as `media.layers` pushes.
+- Added `VideoPlayer` quality menu (`Auto`, `720p`, `360p`, `180p`) persisted in `sessionStorage`, displaying live received resolution and active layer badge.
+- Files: `packages/shared/src/protocol.ts`, `apps/server/src/media/handlers.ts`, `layers-ice.mock.test.ts`, `apps/web/src/features/studio/usePublisher.ts`, `Studio.tsx`, `apps/web/src/features/stream/useViewer.ts`, `VideoPlayer.tsx`, `docs/PROGRESS.md`.
+- Verification: `pnpm --filter @netstream/server test run src/media/layers-ice.mock.test.ts` (5/5 passed) and `pnpm -r run typecheck` clean.

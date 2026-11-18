@@ -516,4 +516,33 @@
    - Reopen Tab A at `/studio` within 15 seconds: Tab A re-establishes the broadcast, Tab B recovers playback without refreshing.
    - Kill Tab A again and wait longer than 15 seconds: the stream terminates, Tab B transitions to offline, and the channel disappears from the Home directory grid.
 
+### Verification of Simulcast & Quality Selection (Task 15)
+
+1. **Run Unit Tests**:
+   ```bash
+   pnpm --filter @netstream/server test run src/media/layers-ice.mock.test.ts
+   ```
+
+2. **Verify Three Outbound Simulcast Streams via `chrome://webrtc-internals`**:
+   - Start a camera broadcast in Creator Studio (`http://localhost:5173/studio`) and click **Go Live**.
+   - Open a new tab to `chrome://webrtc-internals`.
+   - Select the `RTCPeerConnection` tab corresponding to `http://localhost:5173/studio`.
+   - Expand **Stats Tables** and look for `RTCOutboundRtpVideoStream` (`outbound-rtp`, `kind=video`).
+   - Confirm there are **three separate `outbound-rtp` video streams** with `rid: "r0"`, `rid: "r1"`, and `rid: "r2"`, showing scaled resolutions (e.g., 1/4, 1/2, 1x) and distinct `bytesSent` / `scalabilityMode: "L1T3"`.
+   - Open two viewer tabs (`/c/<name>`): set Viewer 1 to `180p` via the quality menu and keep Viewer 2 on `Auto`. Verify Viewer 1's resolution/layer badge drops to `S0T2` and lower resolution while Viewer 2 remains at high quality.
+
+### Verification of Reconnection & ICE Restart (Task 16)
+
+1. **Run Unit Tests**:
+   ```bash
+   pnpm --filter @netstream/server test run src/media/layers-ice.mock.test.ts
+   ```
+
+2. **Manual Recovery Verification**:
+   - Stream from Studio (Tab A) and watch on `/c/<name>` (Tab B).
+   - Click the **Drop WS** button inside the bottom-left dev status badge (`WS: open`) on Tab A or Tab B, or toggle Wi-Fi off for 5 seconds and back on.
+   - Verify both sides display the reconnecting state (without destroying the viewer `<video>` element) and automatically recover playback without a page reload.
+   - **Observed Recovery Time**: _Record after manual test (expected: ~1-2 s for dev WS drop, ~3-5 s for ICE restart after Wi-Fi restore)._
+
+
 

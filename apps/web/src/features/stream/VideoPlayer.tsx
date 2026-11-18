@@ -1,17 +1,21 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Button } from '../../components/ui/Button';
-import { useViewer } from './useViewer';
+import { useViewer, type QualityOption } from './useViewer';
 
 export interface VideoPlayerProps {
   channelId?: string;
   channelName?: string;
 }
 
+const QUALITY_OPTIONS: QualityOption[] = ['Auto', '720p', '360p', '180p'];
+
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   channelId,
   channelName = 'Streamer',
 }) => {
-  const { status, error, mediaStream, retry } = useViewer({ channelId });
+  const { status, error, mediaStream, quality, setQuality, activeLayers, retry } = useViewer({
+    channelId,
+  });
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -20,27 +24,50 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [volume, setVolume] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
+  const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
+  const [resolution, setResolution] = useState<{ width: number; height: number } | null>(null);
   const hideControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Attach MediaStream to HTMLVideoElement
+  // Attach MediaStream to HTMLVideoElement without destroying the video element
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
     if (mediaStream) {
-      video.srcObject = mediaStream;
-      // Start muted for autoplay compliance
+      if (video.srcObject !== mediaStream) {
+        video.srcObject = mediaStream;
+      }
       video.muted = isMuted;
       video.volume = volume;
-      video
-        .play()
-        .catch(() => {
-          // If browser rejects even muted autoplay, remain ready
-        });
-    } else {
+      video.play().catch(() => {
+        // Ignore browser autoplay rejection
+      });
+    } else if (status === 'offline' || status === 'failed') {
       video.srcObject = null;
+      setResolution(null);
     }
-  }, [mediaStream, isMuted, volume]);
+  }, [mediaStream, isMuted, volume, status]);
+
+  // Track received video resolution
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const updateResolution = () => {
+      if (video.videoWidth > 0 && video.videoHeight > 0) {
+        setResolution({ width: video.videoWidth, height: video.videoHeight });
+      }
+    };
+
+    video.addEventListener('loadedmetadata', updateResolution);
+    video.addEventListener('resize', updateResolution);
+    updateResolution();
+
+    return () => {
+      video.removeEventListener('loadedmetadata', updateResolution);
+      video.removeEventListener('resize', updateResolution);
+    };
+  }, [mediaStream]);
 
   // Handle unmute click
   const handleUnmute = useCallback(() => {
@@ -122,28 +149,34 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       clearTimeout(hideControlsTimerRef.current);
     }
     hideControlsTimerRef.current = setTimeout(() => {
-      if (status === 'playing') {
+      if (status === 'playing' && !qualityMenuOpen) {
         setShowControls(false);
       }
     }, 3000);
-  }, [status]);
+  }, [status, qualityMenuOpen]);
+
+  const showVideoElement = status === 'playing' || status === 'reconnecting';
+
+  const layerLabel = activeLayers
+    ? `S${activeLayers.spatialLayer}${activeLayers.temporalLayer !== undefined ? `T${activeLayers.temporalLayer}` : ''}`
+    : null;
 
   return (
     <div
       ref={containerRef}
       onMouseMove={handleMouseMove}
       onMouseLeave={() => {
-        if (status === 'playing') setShowControls(false);
+        if (status === 'playing' && !qualityMenuOpen) setShowControls(false);
       }}
       className="relative aspect-video w-full bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex items-center justify-center select-none group"
     >
-      {/* Video element */}
+      {/* Persistent Video element (kept mounted through playing & reconnecting) */}
       <video
         ref={videoRef}
         autoPlay
         playsInline
         muted={isMuted}
-        className={`w-full h-full object-contain ${status === 'playing' ? 'block' : 'hidden'}`}
+        className={`w-full h-full object-contain ${showVideoElement ? 'block' : 'hidden'}`}
       />
 
       {/* Prominent "Click to Unmute" banner for autoplay */}
@@ -187,11 +220,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
+      {/* Non-destructive Reconnecting overlay over the live video element */}
       {status === 'reconnecting' && (
-        <div className="text-center p-6 space-y-3">
-          <div className="w-10 h-10 mx-auto rounded-full border-2 border-amber-500 border-t-transparent animate-spin" />
-          <p className="text-sm font-medium text-amber-300">Streamer reconnecting...</p>
-          <p className="text-xs text-slate-400">Attempting to resume broadcast feed</p>
+        <div className="absolute inset-0 z-20 bg-black/65 backdrop-blur-[2px] flex items-center justify-center">
+          <div className="text-center p-6 space-y-3">
+            <div className="w-10 h-10 mx-auto rounded-full border-2 border-amber-500 border-t-transparent animate-spin" />
+            <p className="text-sm font-medium text-amber-300">Reconnecting...</p>
+            <p className="text-xs text-slate-300">Attempting to resume broadcast feed</p>
+          </div>
         </div>
       )}
 
@@ -212,20 +248,66 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       {/* Floating Controls Bar (visible when playing & controls visible) */}
       {status === 'playing' && (
         <div
-          className={`absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/90 via-black/50 to-transparent flex items-center justify-between gap-4 transition-opacity duration-300 ${
+          className={`absolute inset-x-0 bottom-0 z-20 p-4 bg-gradient-to-t from-black/90 via-black/50 to-transparent flex items-center justify-between gap-4 transition-opacity duration-300 ${
             showControls ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
           }`}
         >
-          {/* Left: LIVE indicator & Channel badge */}
-          <div className="flex items-center gap-3">
+          {/* Left: LIVE indicator & received resolution / active layer */}
+          <div className="flex items-center gap-2.5">
             <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-rose-600/90 text-white text-xs font-bold uppercase tracking-wider shadow">
               <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
               LIVE
             </div>
+            {(resolution || layerLabel) && (
+              <span className="hidden sm:inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-black/60 border border-slate-700/70 text-[11px] font-mono text-slate-300">
+                {resolution && `${resolution.width}x${resolution.height}`}
+                {resolution && layerLabel && ' · '}
+                {layerLabel && <span className="text-purple-300">{layerLabel}</span>}
+              </span>
+            )}
           </div>
 
-          {/* Right: Volume & Fullscreen controls */}
-          <div className="flex items-center gap-4">
+          {/* Right: Quality menu, Volume & Fullscreen controls */}
+          <div className="flex items-center gap-3 sm:gap-4">
+            {/* Quality Selector Menu */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setQualityMenuOpen((prev) => !prev)}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-black/60 hover:bg-slate-800 border border-slate-700/70 text-xs font-medium text-slate-200 transition-colors"
+                title="Video quality"
+              >
+                <span>{quality}</span>
+                {quality === 'Auto' && resolution && (
+                  <span className="text-[10px] text-slate-400">({resolution.height}p)</span>
+                )}
+              </button>
+
+              {qualityMenuOpen && (
+                <div className="absolute right-0 bottom-9 w-36 rounded-lg bg-slate-900/95 border border-slate-700 shadow-xl py-1 backdrop-blur-md z-30">
+                  <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400 border-b border-slate-800">
+                    Quality {layerLabel ? `(${layerLabel})` : ''}
+                  </div>
+                  {QUALITY_OPTIONS.map((opt) => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => {
+                        setQuality(opt);
+                        setQualityMenuOpen(false);
+                      }}
+                      className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between hover:bg-slate-800 transition-colors ${
+                        quality === opt ? 'text-purple-400 font-semibold' : 'text-slate-200'
+                      }`}
+                    >
+                      <span>{opt}</span>
+                      {quality === opt && <span>✓</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {/* Volume Control */}
             <div className="flex items-center gap-2 group/volume">
               <button
@@ -237,10 +319,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   <svg className="w-5 h-5 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
-                  </svg>
-                ) : volume < 0.5 ? (
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
                   </svg>
                 ) : (
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

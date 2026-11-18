@@ -12,6 +12,55 @@ import {
   endStream,
 } from './lifecycle.js';
 
+function cleanupStaleConnMedia(
+  conn: Conn,
+  gateway: WebSocketGateway,
+  roomManager: ReturnType<typeof getRoomManager>
+): void {
+  const oldState = conn.state.get('media') as ConnMediaState | undefined;
+  if (!oldState) return;
+
+  const oldRoom = roomManager.get(oldState.channelId);
+
+  if (oldState.consumers) {
+    for (const consumer of oldState.consumers.values()) {
+      if (!consumer.closed) {
+        consumer.close();
+      }
+    }
+    oldState.consumers.clear();
+  }
+
+  if (oldState.producers) {
+    for (const producer of oldState.producers.values()) {
+      if (!producer.closed) {
+        producer.close();
+      }
+      oldRoom?.producers.delete(producer.id);
+    }
+    oldState.producers.clear();
+  }
+
+  if (oldState.transports) {
+    for (const entry of oldState.transports.values()) {
+      if (!entry.transport.closed) {
+        entry.transport.close();
+      }
+      oldRoom?.transports.delete(entry.transport.id);
+    }
+    oldState.transports.clear();
+  }
+
+  if (oldState.role === 'viewer') {
+    oldRoom?.viewers.delete(conn.id);
+  }
+
+  if (oldState.channelId) {
+    gateway.leaveRoom(conn, `media:${oldState.channelId}`);
+  }
+  conn.state.delete('media');
+}
+
 export function registerMediaHandlers(gateway: WebSocketGateway): void {
   // 1. media.join
   gateway.dispatcher.register('media.join', async (conn: Conn, msg) => {
@@ -50,20 +99,23 @@ export function registerMediaHandlers(gateway: WebSocketGateway): void {
         throw err;
       }
 
+      // Clean up any stale media state on this connection before re-joining
+      cleanupStaleConnMedia(conn, gateway, roomManager);
+
       const room = await roomManager.getOrCreate(channelId);
 
-      if (room.publisher && room.publisher.connId !== conn.id) {
-        // If the previous publisher connection is stale, update to this connection
-        room.publisher = {
-          userId: conn.user.id,
-          connId: conn.id,
-        };
-      } else {
-        room.publisher = {
-          userId: conn.user.id,
-          connId: conn.id,
-        };
+      // Clean up any stale producers left behind in the room by an earlier disconnected publisher
+      for (const producer of room.producers.values()) {
+        if (!producer.closed) {
+          producer.close();
+        }
       }
+      room.producers.clear();
+
+      room.publisher = {
+        userId: conn.user.id,
+        connId: conn.id,
+      };
 
       const mediaState: ConnMediaState = {
         channelId,
@@ -90,6 +142,9 @@ export function registerMediaHandlers(gateway: WebSocketGateway): void {
         throw new WsHandlerError('MEDIA_OFFLINE', 'Channel is not currently live');
       }
 
+      // Clean up any stale media state on this connection before re-joining
+      cleanupStaleConnMedia(conn, gateway, roomManager);
+
       const mediaState: ConnMediaState = {
         channelId,
         role: 'viewer',
@@ -99,15 +154,12 @@ export function registerMediaHandlers(gateway: WebSocketGateway): void {
       };
       conn.state.set('media', mediaState);
 
-      let viewer = room.viewers.get(conn.id);
-      if (!viewer) {
-        viewer = {
-          connId: conn.id,
-          userId: conn.user.guest ? undefined : conn.user.id,
-          consumers: new Map(),
-        };
-        room.viewers.set(conn.id, viewer);
-      }
+      const viewer = {
+        connId: conn.id,
+        userId: conn.user.guest ? undefined : conn.user.id,
+        consumers: new Map(),
+      };
+      room.viewers.set(conn.id, viewer);
 
       gateway.joinRoom(conn, `media:${channelId}`);
 
@@ -156,6 +208,24 @@ export function registerMediaHandlers(gateway: WebSocketGateway): void {
     transport.observer.on('close', () => {
       mediaState.transports.delete(transport.id);
     });
+
+    if (typeof transport.on === 'function') {
+      transport.on('dtlsstatechange', (dtlsState) => {
+        if (dtlsState === 'closed' || dtlsState === 'failed') {
+          console.warn(
+            `[media] transport dtlsstatechange=${dtlsState} transportId=${transport.id} connId=${conn.id}`
+          );
+        }
+      });
+
+      transport.on('icestatechange', (iceState) => {
+        if (iceState === 'disconnected') {
+          console.warn(
+            `[media] transport icestatechange=${iceState} transportId=${transport.id} connId=${conn.id}`
+          );
+        }
+      });
+    }
 
     return params;
   });
@@ -324,6 +394,13 @@ export function registerMediaHandlers(gateway: WebSocketGateway): void {
         }
       });
 
+      consumer.on('layerschange', (layers) => {
+        conn.send('media.layers', {
+          consumerId: consumer.id,
+          layers: layers ?? null,
+        });
+      });
+
       consumer.observer.on('close', () => {
         mediaState.consumers.delete(consumer.id);
         if (viewer) {
@@ -371,7 +448,55 @@ export function registerMediaHandlers(gateway: WebSocketGateway): void {
     return { resumed };
   });
 
-  // 7. media.end
+  // 7. media.setLayers
+  gateway.dispatcher.register('media.setLayers', async (conn: Conn, msg) => {
+    const { consumerId, spatialLayer, temporalLayer } = msg.d;
+    const mediaState = conn.state.get('media') as ConnMediaState | undefined;
+
+    if (!mediaState || !mediaState.consumers) {
+      throw new WsHandlerError('BAD_REQUEST', 'No active media session');
+    }
+
+    if (mediaState.role !== 'viewer') {
+      throw new WsHandlerError('FORBIDDEN', 'Only viewers can set preferred layers');
+    }
+
+    const consumer = mediaState.consumers.get(consumerId);
+    if (!consumer || consumer.closed) {
+      throw new WsHandlerError('NOT_FOUND', 'Consumer not found for this connection');
+    }
+
+    if (consumer.kind !== 'video') {
+      throw new WsHandlerError('BAD_REQUEST', 'Preferred layers can only be set on video consumers');
+    }
+
+    await consumer.setPreferredLayers({
+      spatialLayer,
+      temporalLayer,
+    });
+
+    return { ok: true, consumerId, spatialLayer, temporalLayer };
+  });
+
+  // 8. media.restartIce
+  gateway.dispatcher.register('media.restartIce', async (conn: Conn, msg) => {
+    const { transportId } = msg.d;
+    const mediaState = conn.state.get('media') as ConnMediaState | undefined;
+
+    if (!mediaState || !mediaState.transports) {
+      throw new WsHandlerError('BAD_REQUEST', 'No active media session');
+    }
+
+    const entry = mediaState.transports.get(transportId);
+    if (!entry || entry.transport.closed) {
+      throw new WsHandlerError('NOT_FOUND', 'Transport not found');
+    }
+
+    const iceParameters = await entry.transport.restartIce();
+    return { iceParameters };
+  });
+
+  // 9. media.end
   gateway.dispatcher.register('media.end', async (conn: Conn, msg) => {
     const mediaState = conn.state.get('media') as ConnMediaState | undefined;
     const channelId = msg.d?.channelId || mediaState?.channelId;

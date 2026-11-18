@@ -12,7 +12,15 @@ export const Studio: React.FC = () => {
   const { client: wsClient, status: wsStatus } = useWs();
   const channelId = channel?.id;
 
-  const { status, error: publisherError, startBroadcast, stopBroadcast, replaceVideoTrack } = usePublisher({
+  const {
+    status,
+    error: publisherError,
+    simulcastNotice,
+    startBroadcast,
+    stopBroadcast,
+    retryBroadcast,
+    replaceVideoTrack,
+  } = usePublisher({
     channelId,
   });
 
@@ -227,7 +235,7 @@ export const Studio: React.FC = () => {
       setPermissionError('Please enable camera or screen share before going live.');
       return;
     }
-    await startBroadcast(stream);
+    await startBroadcast(stream, { isScreenShare: isScreenSharing });
   };
 
   const handleEndStream = () => {
@@ -277,6 +285,14 @@ export const Studio: React.FC = () => {
         </div>
       )}
 
+      {/* Simulcast fallback notice */}
+      {simulcastNotice && (
+        <div className="bg-blue-950/60 border border-blue-800/70 rounded-xl px-4 py-2.5 flex items-center gap-2.5 text-blue-200 text-xs">
+          <span className="w-2 h-2 rounded-full bg-blue-400 shrink-0" />
+          <span>{simulcastNotice}</span>
+        </div>
+      )}
+
       {/* Permission, Publisher, or Connection Error Notices */}
       {(permissionError || publisherError || (wsStatus !== 'open' && wsStatus !== 'connecting')) && (
         <div className="bg-red-950/60 border border-red-800/80 rounded-xl p-4 flex items-start justify-between gap-3 text-red-200">
@@ -293,16 +309,28 @@ export const Studio: React.FC = () => {
               </p>
             </div>
           </div>
-          {wsStatus !== 'open' && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => void wsClient.connect()}
-              className="text-xs flex-shrink-0"
-            >
-              Reconnect
-            </Button>
-          )}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {publisherError && stream && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void retryBroadcast()}
+                className="text-xs"
+              >
+                Retry
+              </Button>
+            )}
+            {wsStatus !== 'open' && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void wsClient.connect()}
+                className="text-xs"
+              >
+                Reconnect
+              </Button>
+            )}
+          </div>
         </div>
       )}
 

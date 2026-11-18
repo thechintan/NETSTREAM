@@ -259,9 +259,31 @@ export interface MediaConsumerClosedPayload {
   consumerId?: string;
 }
 
-// Viewer signaling placeholders (tightened in later tasks)
-export const mediaSetLayersPayloadSchema = z.any();
-export const mediaRestartIcePayloadSchema = z.any();
+// Simulcast layers & ICE restart signaling (Tasks 15 & 16)
+export const mediaSetLayersPayloadSchema = z.object({
+  consumerId: z.string().min(1),
+  spatialLayer: z.number().int().min(0).max(2),
+  temporalLayer: z.number().int().min(0).max(2).optional(),
+});
+export type MediaSetLayersPayload = z.infer<typeof mediaSetLayersPayloadSchema>;
+
+export interface MediaLayersPayload {
+  consumerId: string;
+  layers: {
+    spatialLayer: number;
+    temporalLayer?: number;
+  } | null;
+}
+
+export const mediaRestartIcePayloadSchema = z.object({
+  transportId: z.string().min(1),
+});
+export type MediaRestartIcePayload = z.infer<typeof mediaRestartIcePayloadSchema>;
+
+export interface MediaRestartIceResponse {
+  iceParameters: unknown;
+}
+
 export const mediaEndPayloadSchema = z.object({
   channelId: z.string().uuid().optional(),
 }).optional().default({});

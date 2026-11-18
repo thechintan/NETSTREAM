@@ -221,6 +221,17 @@ export class WsClient {
     this.setStatus('closed');
   }
 
+  /**
+   * Dev helper: abruptly close the underlying socket without disabling auto-reconnect,
+   * simulating a transient network drop to test recovery.
+   */
+  public simulateDisconnect(): void {
+    if (this.ws) {
+      this.isManuallyClosed = false;
+      this.ws.close(4000, 'Dev simulated disconnect');
+    }
+  }
+
   private emit(t: string, data: unknown): void {
     const set = this.listeners.get(t);
     if (set) {

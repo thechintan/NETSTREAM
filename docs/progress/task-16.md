@@ -1,0 +1,5 @@
+- Added `media.restartIce` handler returning new `iceParameters`, transport `dtlsstatechange`/`icestatechange` warning logs with `conn.id`, and idempotent stale-state cleanup on `media.join` re-joins.
+- Added ICE restart logic (`3s` delay on `disconnected`, immediate on `failed`, max 3 attempts with Retry) and automatic WebSocket reconnect rebuild in both `usePublisher` and `useViewer`.
+- Preserved `<video>` element during reconnection with a non-destructive `Reconnecting...` overlay in `VideoPlayer.tsx`, and added a `Drop WS` test button to the dev WS status badge.
+- Files: `packages/shared/src/protocol.ts`, `apps/server/src/media/handlers.ts`, `lifecycle.ts`, `layers-ice.mock.test.ts`, `apps/web/src/lib/ws.ts`, `WsContext.tsx`, `usePublisher.ts`, `Studio.tsx`, `useViewer.ts`, `VideoPlayer.tsx`.
+- Verification: `pnpm --filter @netstream/server test run src/media/layers-ice.mock.test.ts` (5/5 passed) and `pnpm -r run typecheck` clean.
