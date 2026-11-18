@@ -9,7 +9,7 @@ import { useWs } from '../lib/WsContext';
 import { api } from '../lib/api';
 
 export const Studio: React.FC = () => {
-  const { user, channel } = useAuth();
+  const { user, channel, refreshUser } = useAuth();
   const { client: wsClient, status: wsStatus } = useWs();
   const channelId = channel?.id;
 
@@ -82,6 +82,18 @@ export const Studio: React.FC = () => {
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [categories, setCategories] = useState<CategoryDto[]>([]);
+  const [streamTitle, setStreamTitle] = useState<string>(channel?.title ?? '');
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string>(channel?.categoryId ?? '');
+  const [savingInfo, setSavingInfo] = useState(false);
+  const [infoSavedNotice, setInfoSavedNotice] = useState<string | null>(null);
+
+  // Sync local title/category when channel loads
+  useEffect(() => {
+    if (channel) {
+      setStreamTitle((prev) => (prev === '' ? channel.title : prev));
+      setSelectedCategoryId((prev) => (prev === '' && channel.categoryId ? channel.categoryId : prev));
+    }
+  }, [channel]);
 
   // Load categories to display category name
   useEffect(() => {
@@ -102,7 +114,38 @@ export const Studio: React.FC = () => {
     };
   }, []);
 
-  const categoryName = categories.find((c) => c.id === channel?.categoryId)?.name || 'General';
+  const categoryName =
+    categories.find((c) => c.id === (selectedCategoryId || channel?.categoryId))?.name || 'General';
+  const hasValidTitle = streamTitle.trim().length > 0;
+
+  const saveStreamInfo = useCallback(async (): Promise<boolean> => {
+    const trimmed = streamTitle.trim();
+    if (!trimmed) return false;
+
+    const categoryChanged = (selectedCategoryId || null) !== (channel?.categoryId ?? null);
+    const titleChanged = trimmed !== (channel?.title ?? '');
+    if (!titleChanged && !categoryChanged) return true;
+
+    setSavingInfo(true);
+    setInfoSavedNotice(null);
+    try {
+      await api.patch('/api/channels/me', {
+        title: trimmed,
+        categoryId: selectedCategoryId || null,
+      });
+      await refreshUser();
+      setInfoSavedNotice('Saved');
+      setTimeout(() => setInfoSavedNotice(null), 2000);
+      return true;
+    } catch (err) {
+      setPermissionError(
+        err instanceof Error ? err.message : 'Failed to update stream title/category.'
+      );
+      return false;
+    } finally {
+      setSavingInfo(false);
+    }
+  }, [streamTitle, selectedCategoryId, channel, refreshUser]);
 
   // Device selections
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
@@ -259,10 +302,16 @@ export const Studio: React.FC = () => {
   };
 
   const handleStartGoLive = async () => {
+    if (!hasValidTitle) {
+      setPermissionError('Please enter a stream title before going live.');
+      return;
+    }
     if (!stream) {
       setPermissionError('Please enable camera or screen share before going live.');
       return;
     }
+    const saved = await saveStreamInfo();
+    if (!saved) return;
     await startBroadcast(stream, { isScreenShare: isScreenSharing });
   };
 
@@ -401,7 +450,7 @@ export const Studio: React.FC = () => {
             <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-4 flex items-end justify-between">
               <div>
                 <p className="text-white font-semibold text-base drop-shadow-md">
-                  {channel?.title || `${user?.username || 'Creator'}'s Stream`}
+                  {streamTitle.trim() || channel?.title || `${user?.username || 'Creator'}'s Stream`}
                 </p>
                 <p className="text-gray-300 text-xs drop-shadow">
                   {categoryName}
@@ -446,7 +495,8 @@ export const Studio: React.FC = () => {
                   variant="primary"
                   size="md"
                   onClick={handleStartGoLive}
-                  disabled={status === 'connecting' || !stream}
+                  disabled={status === 'connecting' || savingInfo || !stream || !hasValidTitle}
+                  title={!hasValidTitle ? 'Enter a stream title before going live' : 'Go Live'}
                   className="px-6 font-semibold bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-950/40"
                 >
                   {status === 'connecting' ? 'Connecting SFU...' : 'Go Live'}
@@ -463,22 +513,59 @@ export const Studio: React.FC = () => {
             <div className="flex items-center justify-between border-b border-gray-800 pb-3">
               <h2 className="text-base font-semibold text-white">Stream Information</h2>
               <Link to="/settings" className="text-xs text-purple-400 hover:text-purple-300">
-                Edit in Settings &rarr;
+                More Settings &rarr;
               </Link>
             </div>
 
             <div className="space-y-3 text-sm">
               <div>
-                <span className="text-gray-400 block text-xs">Title</span>
-                <span className="text-white font-medium break-words">
-                  {channel?.title || 'No title set'}
-                </span>
+                <label htmlFor="studio-title" className="text-gray-400 block text-xs mb-1">
+                  Title <span className="text-rose-400">*</span>
+                </label>
+                <input
+                  id="studio-title"
+                  type="text"
+                  value={streamTitle}
+                  onChange={(e) => setStreamTitle(e.target.value)}
+                  maxLength={100}
+                  placeholder="What are you streaming today?"
+                  className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-purple-500 text-xs"
+                />
+                {!hasValidTitle && (
+                  <p className="text-[11px] text-amber-400 mt-1">
+                    A title is required before going live.
+                  </p>
+                )}
               </div>
               <div>
-                <span className="text-gray-400 block text-xs">Category</span>
-                <span className="text-gray-200">
-                  {categoryName}
-                </span>
+                <label htmlFor="studio-category" className="text-gray-400 block text-xs mb-1">
+                  Category
+                </label>
+                <select
+                  id="studio-category"
+                  value={selectedCategoryId}
+                  onChange={(e) => setSelectedCategoryId(e.target.value)}
+                  className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-gray-200 focus:outline-none focus:border-purple-500 text-xs"
+                >
+                  <option value="">No category</option>
+                  {categories.map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-xs text-emerald-400">{infoSavedNotice || ''}</span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void saveStreamInfo()}
+                  disabled={savingInfo || !hasValidTitle}
+                  className="text-xs"
+                >
+                  {savingInfo ? 'Saving...' : 'Save Info'}
+                </Button>
               </div>
             </div>
           </div>

@@ -1,4 +1,5 @@
 import { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { chatHistoryQuerySchema, updateChannelSchema } from '@netstream/shared';
 import { optionalAuth, requireAuth } from '../auth/middleware.js';
 import { getPersistedChatHistory } from '../chat/service.js';
@@ -8,10 +9,14 @@ import {
   getChannelByName,
   getFollowedChannels,
   getLiveChannels,
+  getLiveChannelsByCategory,
   rotateStreamKey,
+  searchDiscovery,
   unfollowChannel,
   updateMyChannel,
 } from './service.js';
+
+const uuidSchema = z.string().uuid();
 
 export function registerChannelRoutes(app: FastifyInstance) {
   // GET /api/categories
@@ -19,6 +24,40 @@ export function registerChannelRoutes(app: FastifyInstance) {
     const list = await getCategories();
     return reply.status(200).send(list);
   });
+
+  // GET /api/categories/:id/live
+  app.get<{ Params: { id: string } }>(
+    '/api/categories/:id/live',
+    async (request, reply) => {
+      const { id } = request.params;
+      if (!uuidSchema.safeParse(id).success) {
+        return reply.status(404).send({
+          error: 'NOT_FOUND',
+          message: 'Category not found',
+        });
+      }
+
+      const result = await getLiveChannelsByCategory(id);
+      if (!result) {
+        return reply.status(404).send({
+          error: 'NOT_FOUND',
+          message: 'Category not found',
+        });
+      }
+
+      return reply.status(200).send(result);
+    }
+  );
+
+  // GET /api/search?q=
+  app.get<{ Querystring: { q?: string } }>(
+    '/api/search',
+    async (request, reply) => {
+      const q = request.query.q ?? '';
+      const result = await searchDiscovery(q);
+      return reply.status(200).send(result);
+    }
+  );
 
   // GET /api/channels/:name (public, optionalAuth for isFollowing)
   app.get<{ Params: { name: string } }>(

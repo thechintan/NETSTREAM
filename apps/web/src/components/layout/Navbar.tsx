@@ -1,6 +1,9 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import type { SearchResponseDto } from '@netstream/shared';
 import { useAuth } from '../../features/auth/AuthContext';
+import { NotificationBell } from '../../features/notifications/NotificationBell';
+import { api } from '../../lib/api';
 import { Avatar } from '../ui/Avatar';
 import { Button } from '../ui/Button';
 
@@ -8,11 +11,132 @@ export interface NavbarProps {
   onToggleSidebar?: () => void;
 }
 
+type SearchNavItem =
+  | { kind: 'channel'; id: string; name: string; title: string; isLive: boolean; viewerCount: number; to: string }
+  | { kind: 'category'; id: string; name: string; to: string };
+
 export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
   const { user, logout } = useAuth();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const navigate = useNavigate();
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Interactive Search state (Task 19)
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<SearchResponseDto>({ channels: [], categories: [] });
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+
+  // Debounced search query
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setResults({ channels: [], categories: [] });
+      setActiveIndex(-1);
+      setSearching(false);
+      return;
+    }
+
+    let cancelled = false;
+    setSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api.get<SearchResponseDto>(
+          `/api/search?q=${encodeURIComponent(trimmed)}`
+        );
+        if (!cancelled) {
+          setResults(res || { channels: [], categories: [] });
+          setActiveIndex(0);
+        }
+      } catch {
+        if (!cancelled) {
+          setResults({ channels: [], categories: [] });
+        }
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 180);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query]);
+
+  // Close search dropdown on outside click
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (
+        searchContainerRef.current &&
+        !searchContainerRef.current.contains(e.target as Node)
+      ) {
+        setSearchOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
+
+  const navItems: SearchNavItem[] = useMemo(() => {
+    const items: SearchNavItem[] = [];
+    for (const ch of results.channels) {
+      items.push({
+        kind: 'channel',
+        id: ch.id,
+        name: ch.name,
+        title: ch.title,
+        isLive: ch.isLive,
+        viewerCount: ch.viewerCount,
+        to: `/c/${ch.name}`,
+      });
+    }
+    for (const cat of results.categories) {
+      items.push({
+        kind: 'category',
+        id: cat.id,
+        name: cat.name,
+        to: `/categories/${cat.id}`,
+      });
+    }
+    return items;
+  }, [results]);
+
+  const handleSelectItem = (item: SearchNavItem) => {
+    setSearchOpen(false);
+    setQuery('');
+    setActiveIndex(-1);
+    navigate(item.to);
+  };
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!searchOpen && (e.key === 'ArrowDown' || e.key === 'Enter')) {
+      if (query.trim()) setSearchOpen(true);
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (navItems.length > 0) {
+        setActiveIndex((prev) => (prev + 1) % navItems.length);
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (navItems.length > 0) {
+        setActiveIndex((prev) => (prev <= 0 ? navItems.length - 1 : prev - 1));
+      }
+    } else if (e.key === 'Enter') {
+      if (navItems.length > 0) {
+        e.preventDefault();
+        const target = navItems[activeIndex >= 0 ? activeIndex : 0];
+        if (target) handleSelectItem(target);
+      }
+    } else if (e.key === 'Escape') {
+      setSearchOpen(false);
+      setActiveIndex(-1);
+    }
+  };
 
   const handleLogout = async () => {
     setDropdownOpen(false);
@@ -20,9 +144,11 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
     navigate('/');
   };
 
+  const channelCount = results.channels.length;
+
   return (
     <header className="sticky top-0 z-40 h-14 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-3 md:px-5">
-      {/* Left: Hamburger & Logo */}
+      {/* Left: Hamburger, Logo & Browse Links */}
       <div className="flex items-center gap-3">
         {onToggleSidebar && (
           <button
@@ -47,10 +173,17 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
             NetStream Live
           </span>
         </Link>
+
+        <Link
+          to="/categories"
+          className="hidden md:inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition"
+        >
+          Categories
+        </Link>
       </div>
 
-      {/* Middle: Search Box Placeholder */}
-      <div className="flex-1 max-w-xs md:max-w-md mx-2 sm:mx-6">
+      {/* Middle: Interactive Debounced Search Box with Keyboard Navigation */}
+      <div className="flex-1 max-w-xs md:max-w-md mx-2 sm:mx-6" ref={searchContainerRef}>
         <div className="relative">
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -59,15 +192,127 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
           </div>
           <input
             type="text"
-            placeholder="Search channels..."
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setSearchOpen(true);
+            }}
+            onFocus={() => {
+              if (query.trim()) setSearchOpen(true);
+            }}
+            onKeyDown={handleSearchKeyDown}
+            placeholder="Search channels & categories..."
+            aria-label="Search channels and categories"
+            aria-expanded={searchOpen && query.trim().length > 0}
+            aria-autocomplete="list"
+            role="combobox"
             className="w-full pl-9 pr-3 py-1.5 bg-slate-950 border border-slate-700/80 rounded-lg text-xs md:text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 transition"
-            readOnly
-            title="Search will be interactive in a future task"
           />
+
+          {searchOpen && query.trim().length > 0 && (
+            <div
+              role="listbox"
+              className="absolute left-0 right-0 mt-1.5 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden z-50 max-h-96 overflow-y-auto"
+            >
+              {searching && navItems.length === 0 ? (
+                <div className="px-4 py-3 text-xs text-slate-400">Searching...</div>
+              ) : navItems.length === 0 ? (
+                <div className="px-4 py-3 text-xs text-slate-500">
+                  No matching channels or categories.
+                </div>
+              ) : (
+                <div className="py-1">
+                  {results.channels.length > 0 && (
+                    <div>
+                      <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                        Channels
+                      </div>
+                      {results.channels.map((ch, idx) => {
+                        const isActive = activeIndex === idx;
+                        return (
+                          <button
+                            key={ch.id}
+                            type="button"
+                            role="option"
+                            aria-selected={isActive}
+                            onMouseEnter={() => setActiveIndex(idx)}
+                            onClick={() =>
+                              handleSelectItem({
+                                kind: 'channel',
+                                id: ch.id,
+                                name: ch.name,
+                                title: ch.title,
+                                isLive: ch.isLive,
+                                viewerCount: ch.viewerCount,
+                                to: `/c/${ch.name}`,
+                              })
+                            }
+                            className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 transition ${
+                              isActive ? 'bg-indigo-600/30 text-white' : 'hover:bg-slate-800/80 text-slate-200'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <Avatar name={ch.ownerUsername} size="sm" />
+                              <div className="min-w-0">
+                                <p className="text-xs font-semibold truncate">{ch.name}</p>
+                                <p className="text-[11px] text-slate-400 truncate">{ch.title}</p>
+                              </div>
+                            </div>
+                            {ch.isLive ? (
+                              <span className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-600/90 text-white text-[10px] font-bold uppercase">
+                                LIVE · {ch.viewerCount}
+                              </span>
+                            ) : (
+                              <span className="shrink-0 text-[10px] text-slate-500">Offline</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {results.categories.length > 0 && (
+                    <div className={results.channels.length > 0 ? 'border-t border-slate-800 mt-1 pt-1' : ''}>
+                      <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                        Categories
+                      </div>
+                      {results.categories.map((cat, idx) => {
+                        const globalIdx = channelCount + idx;
+                        const isActive = activeIndex === globalIdx;
+                        return (
+                          <button
+                            key={cat.id}
+                            type="button"
+                            role="option"
+                            aria-selected={isActive}
+                            onMouseEnter={() => setActiveIndex(globalIdx)}
+                            onClick={() =>
+                              handleSelectItem({
+                                kind: 'category',
+                                id: cat.id,
+                                name: cat.name,
+                                to: `/categories/${cat.id}`,
+                              })
+                            }
+                            className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 text-xs transition ${
+                              isActive ? 'bg-indigo-600/30 text-white' : 'hover:bg-slate-800/80 text-slate-200'
+                            }`}
+                          >
+                            <span className="font-medium truncate">{cat.name}</span>
+                            <span className="text-[10px] text-indigo-300">Category</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Right: User Menu or Auth Buttons */}
+      {/* Right: Notifications Bell, Studio & User Menu or Auth Buttons */}
       <div className="flex items-center gap-2 sm:gap-3">
         {user ? (
           <>
@@ -79,6 +324,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
                 <span>Studio</span>
               </Button>
             </Link>
+
+            <NotificationBell />
 
             {/* Dropdown container */}
             <div className="relative" ref={dropdownRef}>

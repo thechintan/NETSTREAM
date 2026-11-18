@@ -7,6 +7,8 @@ import { AppLayout } from './components/layout/AppLayout';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 
 import { Home } from './pages/Home';
+import { Categories } from './pages/Categories';
+import { Category } from './pages/Category';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { Channel } from './pages/Channel';
@@ -23,6 +25,8 @@ export const App: React.FC = () => {
             <Routes>
               <Route element={<AppLayout />}>
                 <Route path="/" element={<Home />} />
+                <Route path="/categories" element={<Categories />} />
+                <Route path="/categories/:id" element={<Category />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
                 <Route path="/c/:name" element={<Channel />} />

@@ -4,6 +4,7 @@ export const categoryDtoSchema = z.object({
   id: z.string().uuid(),
   name: z.string(),
   thumbnailUrl: z.string().nullable(),
+  liveCount: z.number().int().min(0).optional(),
 });
 
 export type CategoryDto = z.infer<typeof categoryDtoSchema>;
@@ -91,3 +92,46 @@ export const liveChannelDtoSchema = z.object({
 });
 
 export type LiveChannelDto = z.infer<typeof liveChannelDtoSchema>;
+
+// Notifications (Task 18)
+export const notificationDtoSchema = z.object({
+  id: z.string().uuid(),
+  userId: z.string().uuid(),
+  type: z.string(),
+  payload: z.record(z.unknown()),
+  readAt: z.union([z.string(), z.date()]).nullable(),
+  createdAt: z.union([z.string(), z.date()]),
+});
+
+export type NotificationDto = z.infer<typeof notificationDtoSchema>;
+
+export const markNotificationsReadSchema = z
+  .object({
+    ids: z.array(z.string().uuid()).min(1).optional(),
+    all: z.boolean().optional(),
+  })
+  .refine((data) => data.all === true || (data.ids !== undefined && data.ids.length > 0), {
+    message: 'Provide either ids or all: true',
+  });
+
+export type MarkNotificationsReadInput = z.infer<typeof markNotificationsReadSchema>;
+
+// Discovery / Search (Task 19)
+export const searchChannelDtoSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  title: z.string(),
+  isLive: z.boolean(),
+  viewerCount: z.number().int().min(0),
+  ownerUsername: z.string(),
+  category: categoryDtoSchema.nullable(),
+});
+
+export type SearchChannelDto = z.infer<typeof searchChannelDtoSchema>;
+
+export const searchResponseDtoSchema = z.object({
+  channels: z.array(searchChannelDtoSchema),
+  categories: z.array(categoryDtoSchema),
+});
+
+export type SearchResponseDto = z.infer<typeof searchResponseDtoSchema>;

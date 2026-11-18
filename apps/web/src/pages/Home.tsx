@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
+  FollowedChannelDto,
   LiveChannelDto,
   StreamLivePayload,
   StreamOfflinePayload,
@@ -8,11 +9,17 @@ import {
 } from '@netstream/shared';
 import { Avatar } from '../components/ui/Avatar';
 import { Skeleton } from '../components/ui/Skeleton';
+import { useAuth } from '../features/auth/AuthContext';
 import { api } from '../lib/api';
 import { useWs } from '../lib/ws';
 
+type HomeTab = 'all' | 'following';
+
 export const Home: React.FC = () => {
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState<HomeTab>('all');
   const [liveChannels, setLiveChannels] = useState<LiveChannelDto[]>([]);
+  const [followedIds, setFollowedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { client, status, request } = useWs();
@@ -24,7 +31,7 @@ export const Home: React.FC = () => {
       try {
         const data = await api.get<LiveChannelDto[]>('/api/live');
         if (isMounted) {
-          setLiveChannels(data || []);
+          setLiveChannels((data || []).sort((a, b) => (b.viewerCount || 0) - (a.viewerCount || 0)));
         }
       } catch (err) {
         if (isMounted) {
@@ -43,6 +50,31 @@ export const Home: React.FC = () => {
     };
   }, []);
 
+  // Fetch followed channel IDs when logged in (for the Following tab)
+  useEffect(() => {
+    let isMounted = true;
+    if (!user) {
+      setFollowedIds(new Set());
+      return;
+    }
+
+    const fetchFollowing = async () => {
+      try {
+        const list = await api.get<FollowedChannelDto[]>('/api/me/following');
+        if (isMounted && list) {
+          setFollowedIds(new Set(list.map((c) => c.id)));
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    void fetchFollowing();
+    return () => {
+      isMounted = false;
+    };
+  }, [user]);
+
   // Subscribe to live directory room via user.subscribe { topics: ['live'] }
   useEffect(() => {
     if (status !== 'open') return;
@@ -56,7 +88,9 @@ export const Home: React.FC = () => {
     const unsubViewers = client.on<ViewersCountPayload>('viewers.count', (data) => {
       if (!isMounted) return;
       setLiveChannels((prev) =>
-        prev.map((c) => (c.id === data.channelId ? { ...c, viewerCount: data.count } : c))
+        [...prev.map((c) => (c.id === data.channelId ? { ...c, viewerCount: data.count } : c))].sort(
+          (a, b) => (b.viewerCount || 0) - (a.viewerCount || 0)
+        )
       );
     });
 
@@ -73,29 +107,30 @@ export const Home: React.FC = () => {
 
       setLiveChannels((prev) => {
         const exists = prev.some((c) => c.id === data.channelId);
-        if (exists) {
-          return prev.map((c) =>
-            c.id === data.channelId
-              ? {
-                  ...c,
-                  title: data.title || c.title,
-                  category: data.category !== undefined ? formattedCategory : c.category,
-                  viewerCount: data.viewerCount !== undefined ? data.viewerCount : c.viewerCount,
-                }
-              : c
-          );
-        }
-
-        const newChannel: LiveChannelDto = {
-          id: data.channelId,
-          name: data.channelName || 'streamer',
-          title: data.title || 'Live Stream',
-          category: formattedCategory,
-          ownerUsername: data.ownerUsername || 'streamer',
-          viewerCount: data.viewerCount ?? 1,
-          startedAt: new Date().toISOString(),
-        };
-        return [newChannel, ...prev];
+        const updated = exists
+          ? prev.map((c) =>
+              c.id === data.channelId
+                ? {
+                    ...c,
+                    title: data.title || c.title,
+                    category: data.category !== undefined ? formattedCategory : c.category,
+                    viewerCount: data.viewerCount !== undefined ? data.viewerCount : c.viewerCount,
+                  }
+                : c
+            )
+          : [
+              {
+                id: data.channelId,
+                name: data.channelName || 'streamer',
+                title: data.title || 'Live Stream',
+                category: formattedCategory,
+                ownerUsername: data.ownerUsername || 'streamer',
+                viewerCount: data.viewerCount ?? 0,
+                startedAt: new Date().toISOString(),
+              },
+              ...prev,
+            ];
+        return [...updated].sort((a, b) => (b.viewerCount || 0) - (a.viewerCount || 0));
       });
     });
 
@@ -113,13 +148,57 @@ export const Home: React.FC = () => {
     };
   }, [client, request, status]);
 
+  const displayedChannels = useMemo(() => {
+    const base =
+      activeTab === 'following'
+        ? liveChannels.filter((c) => followedIds.has(c.id))
+        : liveChannels;
+    return [...base].sort((a, b) => (b.viewerCount || 0) - (a.viewerCount || 0));
+  }, [activeTab, liveChannels, followedIds]);
+
   return (
     <div className="space-y-6">
-      <header className="border-b border-slate-800 pb-4">
-        <h1 className="text-2xl font-bold tracking-tight text-slate-100">Live Channels</h1>
-        <p className="text-sm text-slate-400 mt-1">
-          Explore sub-second live broadcasts on NetStream Live.
-        </p>
+      <header className="border-b border-slate-800 pb-4 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-100">Live Channels</h1>
+          <p className="text-sm text-slate-400 mt-1">
+            Sorted by viewer count · Sub-second WebRTC broadcasts on NetStream Live.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <div className="inline-flex rounded-lg bg-slate-900 border border-slate-800 p-1">
+            <button
+              type="button"
+              onClick={() => setActiveTab('all')}
+              className={`px-3 py-1 rounded-md text-xs font-semibold transition ${
+                activeTab === 'all'
+                  ? 'bg-indigo-600 text-white shadow'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              All Live ({liveChannels.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('following')}
+              className={`px-3 py-1 rounded-md text-xs font-semibold transition ${
+                activeTab === 'following'
+                  ? 'bg-indigo-600 text-white shadow'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              Following
+            </button>
+          </div>
+
+          <Link
+            to="/categories"
+            className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs font-medium text-slate-300 hover:text-white transition"
+          >
+            Categories
+          </Link>
+        </div>
       </header>
 
       {error && (
@@ -143,7 +222,20 @@ export const Home: React.FC = () => {
             </div>
           ))}
         </div>
-      ) : liveChannels.length === 0 ? (
+      ) : activeTab === 'following' && !user ? (
+        <div className="py-16 text-center space-y-3 max-w-md mx-auto">
+          <h3 className="text-lg font-semibold text-slate-200">Sign in to see followed streams</h3>
+          <p className="text-sm text-slate-400">
+            Log in to track your favorite streamers and get instant go-live alerts.
+          </p>
+          <Link
+            to="/login"
+            className="inline-flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition"
+          >
+            Log in
+          </Link>
+        </div>
+      ) : displayedChannels.length === 0 ? (
         <div className="py-16 text-center space-y-4 max-w-md mx-auto">
           <div className="w-16 h-16 mx-auto rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500">
             <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -156,23 +248,39 @@ export const Home: React.FC = () => {
             </svg>
           </div>
           <div className="space-y-1">
-            <h3 className="text-lg font-semibold text-slate-200">No channels are live right now</h3>
+            <h3 className="text-lg font-semibold text-slate-200">
+              {activeTab === 'following'
+                ? 'None of your followed channels are live'
+                : 'No channels are live right now'}
+            </h3>
             <p className="text-sm text-slate-400">
-              When streamers go live from the browser, their broadcasts will appear here in real time.
+              {activeTab === 'following'
+                ? 'Explore all live channels or categories to follow more creators.'
+                : 'When streamers go live from the browser, their broadcasts will appear here in real time.'}
             </p>
           </div>
           <div className="pt-2">
-            <Link
-              to="/studio"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition"
-            >
-              Start Streaming
-            </Link>
+            {activeTab === 'following' ? (
+              <button
+                type="button"
+                onClick={() => setActiveTab('all')}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition"
+              >
+                Explore All Live
+              </button>
+            ) : (
+              <Link
+                to="/studio"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition"
+              >
+                Start Streaming
+              </Link>
+            )}
           </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-          {liveChannels.map((stream) => (
+          {displayedChannels.map((stream) => (
             <Link
               key={stream.id}
               to={`/c/${stream.name}`}

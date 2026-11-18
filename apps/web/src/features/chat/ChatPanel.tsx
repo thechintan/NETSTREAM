@@ -4,6 +4,12 @@ import { ChatJoinResponse, ChatMessageDto } from '@netstream/shared';
 import { useAuth } from '../auth/AuthContext';
 import { useWs } from '../../lib/ws';
 import { Button } from '../../components/ui/Button';
+import {
+  DEFAULT_EMOTES,
+  messageMentionsUser,
+  tokenizeMessage,
+  type EmoteManifest,
+} from './tokenizer';
 
 interface ChatPanelProps {
   channelId: string;
@@ -33,6 +39,37 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   const [isBanned, setIsBanned] = useState(false);
   const [showSettingsPopover, setShowSettingsPopover] = useState(false);
   const [activeTimeoutMenuMid, setActiveTimeoutMenuMid] = useState<string | null>(null);
+  const [emotes, setEmotes] = useState<EmoteManifest>(DEFAULT_EMOTES);
+  const [showEmotePicker, setShowEmotePicker] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch static emote manifest from /emotes/emotes.json
+  useEffect(() => {
+    let active = true;
+    fetch('/emotes/emotes.json')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: unknown) => {
+        if (active && data && typeof data === 'object' && !Array.isArray(data)) {
+          setEmotes(data as EmoteManifest);
+        }
+      })
+      .catch(() => {
+        // Fallback to DEFAULT_EMOTES
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleInsertEmote = (emoteName: string) => {
+    setInputText((prev) => {
+      const prefix = prev.length > 0 && !prev.endsWith(' ') ? `${prev} ` : prev;
+      const next = `${prefix}:${emoteName}: `;
+      return next.slice(0, 500);
+    });
+    setShowEmotePicker(false);
+    inputRef.current?.focus();
+  };
 
   const isOwner = Boolean(user?.id && channelOwnerId && user.id === channelOwnerId);
   const canModerate = Boolean(isOwner || isMod);
@@ -389,10 +426,17 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               (isOwner || !targetIsMod) &&
               msg.user.id !== user?.id;
 
+            const tokens = isDeleted ? [] : tokenizeMessage(msg.text, emotes);
+            const mentionsMe = !isDeleted && messageMentionsUser(tokens, user?.username);
+
             return (
               <div
                 key={msg.mid}
-                className="text-gray-200 text-xs sm:text-sm break-words leading-relaxed group relative flex items-start justify-between rounded px-1.5 py-0.5 hover:bg-gray-800/40 transition"
+                className={`text-gray-200 text-xs sm:text-sm break-words leading-relaxed group relative flex items-start justify-between rounded px-1.5 py-0.5 transition ${
+                  mentionsMe
+                    ? 'bg-purple-600/25 border-l-2 border-purple-400 hover:bg-purple-600/35'
+                    : 'hover:bg-gray-800/40'
+                }`}
               >
                 <div className="flex-1 min-w-0 pr-2">
                   <span className="text-[11px] text-gray-500 font-mono mr-2 select-none">
@@ -418,11 +462,56 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                     {msg.user.name}:
                   </span>
 
-                  {/* Message body or deleted placeholder */}
+                  {/* Message body (tokenized safely into text, emote, mention, and http/https links) */}
                   {isDeleted ? (
                     <span className="italic text-gray-500 select-none">message deleted</span>
                   ) : (
-                    <span className="text-gray-100">{msg.text}</span>
+                    <span className="text-gray-100">
+                      {tokens.map((tok, idx) => {
+                        if (tok.type === 'emote') {
+                          return (
+                            <img
+                              key={idx}
+                              src={tok.src}
+                              alt={`:${tok.name}:`}
+                              title={`:${tok.name}:`}
+                              className="inline-block w-5 h-5 align-text-bottom mx-0.5 select-none"
+                            />
+                          );
+                        }
+                        if (tok.type === 'mention') {
+                          const isSelfMention =
+                            Boolean(user?.username) &&
+                            tok.username.toLowerCase() === user!.username.toLowerCase();
+                          return (
+                            <span
+                              key={idx}
+                              className={`font-semibold rounded px-0.5 ${
+                                isSelfMention
+                                  ? 'bg-purple-500/40 text-purple-100'
+                                  : 'text-indigo-300'
+                              }`}
+                            >
+                              {tok.raw}
+                            </span>
+                          );
+                        }
+                        if (tok.type === 'link') {
+                          return (
+                            <a
+                              key={idx}
+                              href={tok.href}
+                              target="_blank"
+                              rel="noopener noreferrer nofollow"
+                              className="text-sky-400 hover:text-sky-300 underline break-all"
+                            >
+                              {tok.label}
+                            </a>
+                          );
+                        }
+                        return <React.Fragment key={idx}>{tok.value}</React.Fragment>;
+                      })}
+                    </span>
                   )}
                 </div>
 
@@ -549,9 +638,46 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         )}
 
         {user ? (
-          <form onSubmit={handleSendMessage} className="space-y-1.5">
+          <form onSubmit={handleSendMessage} className="space-y-1.5 relative">
+            {/* Emote Picker Popover */}
+            {showEmotePicker && (
+              <div className="absolute bottom-full right-0 mb-2 w-64 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl p-2.5 z-30">
+                <div className="flex items-center justify-between text-[11px] text-gray-400 pb-1.5 mb-2 border-b border-gray-800">
+                  <span className="font-semibold uppercase tracking-wider">Emotes</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowEmotePicker(false)}
+                    className="text-gray-400 hover:text-white"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {Object.entries(emotes).map(([name, file]) => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => handleInsertEmote(name)}
+                      title={`:${name}:`}
+                      className="flex flex-col items-center justify-center p-1.5 rounded-lg hover:bg-gray-800 transition"
+                    >
+                      <img
+                        src={`/emotes/${file}`}
+                        alt={`:${name}:`}
+                        className="w-6 h-6"
+                      />
+                      <span className="text-[10px] text-gray-400 mt-0.5 truncate max-w-full">
+                        :{name}:
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="relative flex items-center">
               <input
+                ref={inputRef}
                 type="text"
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
@@ -565,9 +691,26 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                     : 'Send a message...'
                 }
                 disabled={isSending || status !== 'open' || cooldownSeconds > 0 || isBanned}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 pr-16 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition disabled:opacity-60"
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 pr-24 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition disabled:opacity-60"
               />
-              <div className="absolute right-1.5 flex items-center gap-1.5">
+              <div className="absolute right-1.5 flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setShowEmotePicker((prev) => !prev)}
+                  disabled={isBanned || status !== 'open'}
+                  title="Pick an emote"
+                  aria-label="Emote picker"
+                  className="p-1.5 rounded text-gray-400 hover:text-amber-300 hover:bg-gray-700/70 transition disabled:opacity-40"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                </button>
                 {cooldownSeconds > 0 ? (
                   <span className="text-xs font-mono font-semibold text-amber-400 bg-amber-950/80 px-2 py-1 rounded">
                     {cooldownSeconds}s

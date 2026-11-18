@@ -1,6 +1,6 @@
 import { and, desc, eq, isNull } from 'drizzle-orm';
-import { channels, db, follows, streams, users, categories } from '../db/index.js';
-import { redis } from '../lib/redis.js';
+import { channels, db, streams, users, categories } from '../db/index.js';
+import { notifyFollowersChannelLive } from '../notifications/service.js';
 import { getPeak, resetPeak } from '../presence/service.js';
 import { publishStreamLive, publishStreamOffline } from '../presence/handlers.js';
 import type { WebSocketGateway } from '../realtime/gateway.js';
@@ -161,24 +161,17 @@ export async function onVideoProducerCreated(
 
   await publishStreamLive(livePayload);
 
-  // 6. Publish stream.live event to Redis for followers
+  // 6. Notify followers in batches of 500 (persists DB rows + pushes notify.live with 10m dedupe)
   try {
-    const followerRows = await db
-      .select({ userId: follows.userId })
-      .from(follows)
-      .where(eq(follows.channelId, channelId));
-
-    for (const f of followerRows) {
-      await redis.publish(
-        `user:${f.userId}`,
-        JSON.stringify({
-          t: 'stream.live',
-          d: livePayload,
-        })
-      );
-    }
+    await notifyFollowersChannelLive({
+      channelId,
+      channelName: channelData.name,
+      title: channelData.title,
+      category: channelData.categoryName ?? null,
+      ownerUsername: channelData.ownerUsername,
+    });
   } catch {
-    // Non-fatal if follower broadcast fails
+    // Non-fatal if follower notification fails
   }
 }
 

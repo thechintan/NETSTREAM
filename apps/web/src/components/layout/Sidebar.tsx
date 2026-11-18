@@ -1,6 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { FollowedChannelDto, StreamLivePayload, StreamOfflinePayload } from '@netstream/shared';
+import {
+  FollowedChannelDto,
+  NotifyLivePayload,
+  StreamLivePayload,
+  StreamOfflinePayload,
+} from '@netstream/shared';
 import { useAuth } from '../../features/auth/AuthContext';
 import { api } from '../../lib/api';
 import { useWs } from '../../lib/ws';
@@ -14,7 +19,7 @@ export interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
   const { user } = useAuth();
-  const { client } = useWs();
+  const { client, status, request } = useWs();
   const [following, setFollowing] = useState<FollowedChannelDto[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -50,22 +55,41 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
     };
   }, [user]);
 
-  // Realtime updates on stream.live and stream.offline for followed channels
+  // Subscribe to live directory updates so Following list stays live across all pages
   useEffect(() => {
-    const unsubLive = client.on<StreamLivePayload>('stream.live', (data) => {
+    if (!user || status !== 'open') return;
+    void request('user.subscribe', { topics: ['live'] }).catch(() => {});
+  }, [user, status, request]);
+
+  // Realtime updates on stream.live, notify.live, and stream.offline for followed channels
+  useEffect(() => {
+    const markLive = (channelId: string) => {
       setFollowing((prev) =>
-        prev.map((c) => (c.id === data.channelId ? { ...c, isLive: true } : c))
+        [...prev.map((c) => (c.id === channelId ? { ...c, isLive: true } : c))].sort(
+          (a, b) => Number(b.isLive) - Number(a.isLive)
+        )
       );
+    };
+
+    const unsubLive = client.on<StreamLivePayload>('stream.live', (data) => {
+      markLive(data.channelId);
+    });
+
+    const unsubNotifyLive = client.on<NotifyLivePayload>('notify.live', (data) => {
+      markLive(data.channelId);
     });
 
     const unsubOffline = client.on<StreamOfflinePayload>('stream.offline', (data) => {
       setFollowing((prev) =>
-        prev.map((c) => (c.id === data.channelId ? { ...c, isLive: false } : c))
+        [...prev.map((c) => (c.id === data.channelId ? { ...c, isLive: false } : c))].sort(
+          (a, b) => Number(b.isLive) - Number(a.isLive)
+        )
       );
     });
 
     return () => {
       unsubLive();
+      unsubNotifyLive();
       unsubOffline();
     };
   }, [client]);

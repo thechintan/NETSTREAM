@@ -557,5 +557,17 @@
    - Open a viewer tab (`/c/<name>`), click **Stats** in the player bar (or press `S`), and verify live metrics and the 60s SVG sparklines (bitrate, loss %, RTT) update every second.
    - Enter a scenario label (e.g. `loss-5pct-run1`), click **Start**, wait 30 seconds, click **Stop**, then click **CSV** to download and verify all 16 columns in a spreadsheet.
 
+### Verification of Go-live Notifications, Discovery & Chat Polish (Tasks 18–20)
+
+1. **Run Unit & Integration Tests**:
+   ```bash
+   pnpm --filter @netstream/server test run src/notifications/notifications.test.ts src/channels/discovery.test.ts
+   pnpm exec vitest run apps/web/src/features/chat/tokenizer.test.ts
+   ```
+2. **Manual Verification**:
+   - **Task 18**: User A follows User B; B goes live in Studio; A instantly sees the clickable toast, unread bell badge, notification dropdown (with Mark all read), and live sidebar update.
+   - **Task 19**: Type a partial channel name in the Navbar search, use `ArrowDown`/`ArrowUp` + `Enter` to open the channel by keyboard only; browse `/categories` and `/categories/:id`; verify Studio disables Go Live when title is blank and Home sorts by viewer count with a Following tab.
+   - **Task 20**: In channel chat, open the emote picker to insert `:wave:` / `:gg:`, send `@<username>` and an `https://` link, and confirm HTML tags or `javascript:` URLs render strictly as plain text.
+
 
 

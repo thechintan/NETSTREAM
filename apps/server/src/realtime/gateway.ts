@@ -6,6 +6,7 @@ import { redeemTicket } from '../auth/ticket.js';
 import { Conn, ConnUser } from './conn.js';
 import { Dispatcher } from './dispatcher.js';
 
+export type ConnectHook = (conn: Conn) => void | Promise<void>;
 export type CleanupHook = (conn: Conn) => void | Promise<void>;
 export type HeartbeatHook = (conn: Conn) => void | Promise<void>;
 
@@ -21,6 +22,7 @@ export class WebSocketGateway {
   public readonly dispatcher: Dispatcher;
   public readonly conns = new Map<string, Conn>();
   public readonly rooms = new Map<string, Set<Conn>>();
+  private connectHooks: ConnectHook[] = [];
   private cleanupHooks: CleanupHook[] = [];
   private heartbeatHooks: HeartbeatHook[] = [];
   private heartbeatTimer: NodeJS.Timeout | null = null;
@@ -39,6 +41,13 @@ export class WebSocketGateway {
     this.dispatcher = new Dispatcher(options.maxPerSecond ?? 50);
 
     this.startHeartbeat();
+  }
+
+  /**
+   * Register a connect hook to be executed whenever a new connection is authenticated and opened.
+   */
+  public onConnect(hook: ConnectHook): void {
+    this.connectHooks.push(hook);
   }
 
   /**
@@ -117,6 +126,14 @@ export class WebSocketGateway {
   private handleConnection(ws: WebSocket, user: ConnUser): void {
     const conn = new Conn(ws, user);
     this.conns.set(conn.id, conn);
+
+    for (const hook of this.connectHooks) {
+      try {
+        void hook(conn);
+      } catch {
+        // Ignore errors in connect hooks
+      }
+    }
 
     // Heartbeat pong tracking
     ws.on('pong', () => {

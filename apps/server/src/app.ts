@@ -5,6 +5,7 @@ import { registerAuthRoutes } from './auth/routes.js';
 import { registerChannelRoutes } from './channels/routes.js';
 import { getChatPersistenceWorker, registerChatHandlers } from './chat/index.js';
 import { registerModerationHandlers, registerModerationRoutes } from './moderation/index.js';
+import { registerNotificationHandlers, registerNotificationRoutes } from './notifications/index.js';
 import { initPresenceWorker, registerPresenceHandlers } from './presence/index.js';
 import { initMedia, registerMediaHandlers, shutdownMedia, recoverCrashedStreamsOnBoot } from './media/index.js';
 import { registerMediaRoutes } from './media/routes.js';
@@ -36,6 +37,7 @@ export function buildApp(gatewayOptions?: GatewayOptions): FastifyInstance & { g
   const gateway = new WebSocketGateway(gatewayOptions);
   registerChatHandlers(gateway);
   registerModerationHandlers(gateway);
+  registerNotificationHandlers(gateway);
   registerPresenceHandlers(gateway);
   registerMediaHandlers(gateway);
   const presenceWorker = initPresenceWorker(gateway);
@@ -81,6 +83,9 @@ export function buildApp(gatewayOptions?: GatewayOptions): FastifyInstance & { g
 
   // Register moderation routes
   registerModerationRoutes(app);
+
+  // Register notification routes
+  registerNotificationRoutes(app);
 
   // Register media routes
   registerMediaRoutes(app);

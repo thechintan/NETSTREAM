@@ -180,6 +180,28 @@ export const streamReconnectingPayloadSchema = z.object({
 
 export type StreamReconnectingPayload = z.infer<typeof streamReconnectingPayloadSchema>;
 
+// Notification push payloads (Task 18)
+export interface NotifyLivePayload {
+  id: string;
+  type: 'live';
+  channelId: string;
+  channelName: string;
+  title: string;
+  category: string | null;
+  ownerUsername?: string;
+  createdAt: string;
+}
+
+export interface NotifyFollowPayload {
+  id: string;
+  type: 'follow';
+  channelId: string;
+  channelName: string;
+  followerId: string;
+  followerUsername: string;
+  createdAt: string;
+}
+
 // Real payload schemas for media.* signaling
 export const mediaJoinPayloadSchema = z.object({
   channelId: z.string().uuid(),
