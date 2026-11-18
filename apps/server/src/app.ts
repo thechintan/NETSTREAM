@@ -9,6 +9,7 @@ import { registerNotificationHandlers, registerNotificationRoutes } from './noti
 import { initPresenceWorker, registerPresenceHandlers } from './presence/index.js';
 import { initMedia, registerMediaHandlers, shutdownMedia, recoverCrashedStreamsOnBoot } from './media/index.js';
 import { registerMediaRoutes } from './media/routes.js';
+import { getHlsPipelineManager, registerHlsRoutes } from './recording/index.js';
 import { config } from './config/index.js';
 import { pingDb } from './db/index.js';
 import { pingRedis } from './lib/redis.js';
@@ -47,10 +48,12 @@ export function buildApp(gatewayOptions?: GatewayOptions): FastifyInstance & { g
 
   app.addHook('onReady', async () => {
     await initMedia();
+    getHlsPipelineManager().init();
     await recoverCrashedStreamsOnBoot();
   });
 
   app.addHook('onClose', async () => {
+    await getHlsPipelineManager().shutdown();
     await gateway.close();
     await getChatPersistenceWorker().close();
     await presenceWorker.close();
@@ -89,6 +92,9 @@ export function buildApp(gatewayOptions?: GatewayOptions): FastifyInstance & { g
 
   // Register media routes
   registerMediaRoutes(app);
+
+  // Register HLS output routes (/hls/:channelId/:file)
+  registerHlsRoutes(app);
 
   // Health check endpoint
   app.get('/api/health', async (_request, reply) => {

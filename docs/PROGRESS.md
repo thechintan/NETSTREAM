@@ -589,5 +589,25 @@
    - Press `S` (or click **Stats**) to open the Network Stats overlay, then check **Force TURN relay (DEV)** (`iceTransportPolicy: 'relay'`).
    - The player reconnects and plays via coturn; confirm the **Candidate** row in the Stats overlay displays `relay / udp` (or `relay / tcp`).
 
+### Verification of HLS Output and Player Fallback (Task 22)
+
+1. **FFmpeg Prerequisite**:
+   - Verified with `ffmpeg -version`: FFmpeg is **not currently installed on PATH** on this host, so the server logs a clear warning at startup and disables HLS output without crashing.
+   - To enable live HLS output, install FFmpeg and restart the server:
+     - Windows: `winget install Gyan.FFmpeg` (or `choco install ffmpeg`) and open a new terminal, then verify `ffmpeg -version`.
+     - macOS: `brew install ffmpeg`
+     - Linux (Ubuntu/Debian): `sudo apt-get install ffmpeg`
+2. **Run Unit Tests**:
+   ```bash
+   pnpm --filter @netstream/server test run src/recording/recording.test.ts
+   ```
+3. **Manual Verification & Latency Comparison**:
+   - With FFmpeg installed and `HLS_ENABLED=true`, go live in `/studio`.
+   - Open `http://localhost:3000/hls/<channelId>/index.m3u8` in VLC (or select **Compatibility mode (HLS)** in the player quality menu at `/c/<name>`).
+   - Compare end-to-end delay side-by-side against a WebRTC viewer tab:
+     - **WebRTC (`WebRTC (low latency)`)**: ~0.3–0.8 s end-to-end glass-to-glass latency.
+     - **HLS (`HLS (about 6-10 s delay)`)**: ~6–10 s end-to-end latency (2-second segments, 3-segment live sync buffer).
+   - Click the `HLS (about 6-10 s delay)` badge (or choose **WebRTC (low latency)** in the quality menu) to switch back.
+
 
 

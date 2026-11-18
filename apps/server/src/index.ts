@@ -3,6 +3,7 @@ import { config } from './config/index.js';
 import { closeDb } from './db/index.js';
 import { closeRedis } from './lib/redis.js';
 import { initMedia, shutdownMedia } from './media/index.js';
+import { getHlsPipelineManager } from './recording/index.js';
 
 const app = buildApp();
 
@@ -15,6 +16,7 @@ async function gracefulShutdown(signal: string) {
   app.log.info({ signal }, 'Received termination signal, starting graceful shutdown...');
 
   try {
+    await getHlsPipelineManager().shutdown();
     await app.close();
     await shutdownMedia();
     await closeRedis();

@@ -3,6 +3,7 @@ import { channels, db, streams, users, categories } from '../db/index.js';
 import { notifyFollowersChannelLive } from '../notifications/service.js';
 import { getPeak, resetPeak } from '../presence/service.js';
 import { publishStreamLive, publishStreamOffline } from '../presence/handlers.js';
+import { getHlsPipelineManager } from '../recording/hls-pipeline.js';
 import type { WebSocketGateway } from '../realtime/gateway.js';
 import { getRoomManager } from './index.js';
 
@@ -98,6 +99,14 @@ export async function onVideoProducerCreated(
       lifecycle.graceTimer = null;
     }
     lifecycle.publisherConnId = connId;
+    try {
+      const room = getRoomManager().get(channelId);
+      if (room) {
+        void getHlsPipelineManager().startForChannel(channelId, room);
+      }
+    } catch {
+      // ignore if room manager unavailable in unit tests
+    }
     return;
   }
 
@@ -173,6 +182,16 @@ export async function onVideoProducerCreated(
   } catch {
     // Non-fatal if follower notification fails
   }
+
+  // 7. Start HLS transcoding pipeline if HLS_ENABLED=true and FFmpeg is available
+  try {
+    const room = getRoomManager().get(channelId);
+    if (room) {
+      void getHlsPipelineManager().startForChannel(channelId, room);
+    }
+  } catch {
+    // Non-fatal if room manager or FFmpeg unavailable
+  }
 }
 
 /**
@@ -228,6 +247,13 @@ export async function endStream(
       lifecycle.graceTimer = null;
     }
     lifecycle.state = 'ENDING';
+  }
+
+  // 0. Stop HLS FFmpeg pipeline and remove channel HLS directory
+  try {
+    await getHlsPipelineManager().stopForChannel(channelId);
+  } catch {
+    // ignore
   }
 
   // 1. Close media room, router, transports, consumers

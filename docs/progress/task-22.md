@@ -1,0 +1,5 @@
+# Task 22: HLS Output and Player Fallback
+- Built `apps/server/src/recording` (`port-allocator.ts`, `sdp.ts`, `ffmpeg-manager.ts`, `hls-pipeline.ts`, `routes.ts`) with PlainTransports (`rtcpMux: false`, `comedia: false`), RFC 4566 SDP generation, FFmpeg HLS output (`libx264 veryfast zerolatency`, 2s GOP/segments, list 6, `delete_segments`), 3-restart supervisor, clean teardown/directory removal, and graceful disable if FFmpeg is missing.
+- Served `/hls/:channelId/:file` with strict UUID + filename allowlist (path traversal protection), `no-cache` on `index.m3u8`, short cache on `.ts` segments, `WEB_ORIGIN` CORS, and Vite `/hls` dev proxy.
+- Added `hls.js` (+ Safari native HLS) fallback to `VideoPlayer.tsx` triggering after 8s ICE timeout or via "Compatibility mode (HLS)" in the quality menu, with switchable `WebRTC (low latency)` / `HLS (about 6-10 s delay)` badge.
+- Verified with `src/recording/recording.test.ts` (4/4 pass) and server/web typecheck; documented FFmpeg prerequisite and latency comparison in `docs/PROGRESS.md`.

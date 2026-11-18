@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import Hls from 'hls.js';
 import { Button } from '../../components/ui/Button';
 import { StatsOverlay } from '../lab';
 import { useViewer, type QualityOption } from './useViewer';
@@ -8,7 +9,10 @@ export interface VideoPlayerProps {
   channelName?: string;
 }
 
+type PlaybackMode = 'webrtc' | 'hls';
+
 const QUALITY_OPTIONS: QualityOption[] = ['Auto', '720p', '360p', '180p'];
+const ICE_FALLBACK_TIMEOUT_MS = 8000;
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   channelId,
@@ -21,6 +25,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const hlsRef = useRef<Hls | null>(null);
+
+  const [playbackMode, setPlaybackMode] = useState<PlaybackMode>('webrtc');
+  const [hlsStatus, setHlsStatus] = useState<'idle' | 'loading' | 'playing' | 'error'>('idle');
+  const [hlsError, setHlsError] = useState<string | null>(null);
 
   const [isMuted, setIsMuted] = useState(true);
   const [volume, setVolume] = useState(1);
@@ -30,6 +39,36 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [statsVisible, setStatsVisible] = useState(false);
   const [resolution, setResolution] = useState<{ width: number; height: number } | null>(null);
   const hideControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Reset to WebRTC default whenever channelId changes
+  useEffect(() => {
+    setPlaybackMode('webrtc');
+    setHlsStatus('idle');
+    setHlsError(null);
+  }, [channelId]);
+
+  // Automatic HLS fallback if WebRTC ICE has not connected within 8 seconds
+  useEffect(() => {
+    if (playbackMode !== 'webrtc' || !channelId) return;
+    if (status !== 'connecting') return;
+
+    const timer = setTimeout(() => {
+      setPlaybackMode('hls');
+    }, ICE_FALLBACK_TIMEOUT_MS);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [playbackMode, status, channelId]);
+
+  // Return to offline cleanly if channel goes offline while in HLS mode
+  useEffect(() => {
+    if (status === 'offline' && playbackMode === 'hls') {
+      setPlaybackMode('webrtc');
+      setHlsStatus('idle');
+      setHlsError(null);
+    }
+  }, [status, playbackMode]);
 
   // Toggle stats overlay with 'S' key (ignoring inputs/textareas/selects)
   useEffect(() => {
@@ -56,10 +95,110 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     };
   }, []);
 
-  // Attach MediaStream to HTMLVideoElement without destroying the video element
+  // Manage HLS.js / Safari native HLS playback when in Compatibility mode
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+
+    const cleanupHls = () => {
+      if (hlsRef.current) {
+        try {
+          hlsRef.current.destroy();
+        } catch {
+          // ignore
+        }
+        hlsRef.current = null;
+      }
+    };
+
+    if (playbackMode !== 'hls' || !channelId) {
+      cleanupHls();
+      return;
+    }
+
+    const hlsUrl = `/hls/${encodeURIComponent(channelId)}/index.m3u8`;
+    video.srcObject = null;
+    video.muted = isMuted;
+    video.volume = volume;
+    setHlsStatus('loading');
+    setHlsError(null);
+
+    const onPlaying = () => setHlsStatus('playing');
+    video.addEventListener('playing', onPlaying);
+
+    if (Hls.isSupported()) {
+      const hls = new Hls({
+        lowLatencyMode: false,
+        liveSyncDurationCount: 3,
+        maxLiveSyncPlaybackRate: 1.5,
+      });
+      hlsRef.current = hls;
+
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        setHlsStatus('playing');
+        video.play().catch(() => {
+          // Ignore browser autoplay rejection
+        });
+      });
+
+      hls.on(Hls.Events.ERROR, (_evt, data) => {
+        if (data.fatal) {
+          setHlsStatus('error');
+          setHlsError(
+            data.type === Hls.ErrorTypes.NETWORK_ERROR
+              ? 'HLS stream is not yet available (FFmpeg may be starting or disabled).'
+              : 'HLS playback encountered a fatal error.'
+          );
+        }
+      });
+
+      hls.loadSource(hlsUrl);
+      hls.attachMedia(video);
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      // Safari native HLS playback
+      const onError = () => {
+        setHlsStatus('error');
+        setHlsError('Unable to load native HLS playlist.');
+      };
+      video.addEventListener('error', onError);
+      video.src = hlsUrl;
+      video.play().catch(() => {
+        // Ignore browser autoplay rejection
+      });
+
+      return () => {
+        video.removeEventListener('playing', onPlaying);
+        video.removeEventListener('error', onError);
+        video.removeAttribute('src');
+        video.load();
+      };
+    } else {
+      setHlsStatus('error');
+      setHlsError('HLS playback is not supported in this browser.');
+    }
+
+    return () => {
+      video.removeEventListener('playing', onPlaying);
+      cleanupHls();
+    };
+  }, [playbackMode, channelId]);
+
+  // Keep muted/volume synced in HLS mode without recreating HLS instance
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || playbackMode !== 'hls') return;
+    video.muted = isMuted;
+    video.volume = volume;
+  }, [isMuted, volume, playbackMode]);
+
+  // Attach WebRTC MediaStream to HTMLVideoElement without destroying the video element
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || playbackMode !== 'webrtc') return;
+
+    if (video.hasAttribute('src')) {
+      video.removeAttribute('src');
+    }
 
     if (mediaStream) {
       if (video.srcObject !== mediaStream) {
@@ -74,7 +213,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       video.srcObject = null;
       setResolution(null);
     }
-  }, [mediaStream, isMuted, volume, status]);
+  }, [mediaStream, isMuted, volume, status, playbackMode]);
 
   // Track received video resolution
   useEffect(() => {
@@ -95,7 +234,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       video.removeEventListener('loadedmetadata', updateResolution);
       video.removeEventListener('resize', updateResolution);
     };
-  }, [mediaStream]);
+  }, [mediaStream, playbackMode]);
+
+  const switchToWebRtc = useCallback(() => {
+    setPlaybackMode('webrtc');
+    setHlsStatus('idle');
+    setHlsError(null);
+    setQualityMenuOpen(false);
+    if (status !== 'playing') {
+      retry();
+    }
+  }, [status, retry]);
+
+  const switchToHls = useCallback(() => {
+    setPlaybackMode('hls');
+    setQualityMenuOpen(false);
+  }, []);
 
   // Handle unmute click
   const handleUnmute = useCallback(() => {
@@ -170,6 +324,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     };
   }, []);
 
+  const isActivelyPlaying =
+    (playbackMode === 'webrtc' && status === 'playing') ||
+    (playbackMode === 'hls' && hlsStatus === 'playing');
+
   // Controls auto-hide on mouse movement
   const handleMouseMove = useCallback(() => {
     setShowControls(true);
@@ -177,24 +335,27 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       clearTimeout(hideControlsTimerRef.current);
     }
     hideControlsTimerRef.current = setTimeout(() => {
-      if (status === 'playing' && !qualityMenuOpen) {
+      if (isActivelyPlaying && !qualityMenuOpen) {
         setShowControls(false);
       }
     }, 3000);
-  }, [status, qualityMenuOpen]);
+  }, [isActivelyPlaying, qualityMenuOpen]);
 
-  const showVideoElement = status === 'playing' || status === 'reconnecting';
+  const showVideoElement =
+    (playbackMode === 'webrtc' && (status === 'playing' || status === 'reconnecting')) ||
+    (playbackMode === 'hls' && hlsStatus !== 'error');
 
-  const layerLabel = activeLayers
-    ? `S${activeLayers.spatialLayer}${activeLayers.temporalLayer !== undefined ? `T${activeLayers.temporalLayer}` : ''}`
-    : null;
+  const layerLabel =
+    playbackMode === 'webrtc' && activeLayers
+      ? `S${activeLayers.spatialLayer}${activeLayers.temporalLayer !== undefined ? `T${activeLayers.temporalLayer}` : ''}`
+      : null;
 
   return (
     <div
       ref={containerRef}
       onMouseMove={handleMouseMove}
       onMouseLeave={() => {
-        if (status === 'playing' && !qualityMenuOpen) setShowControls(false);
+        if (isActivelyPlaying && !qualityMenuOpen) setShowControls(false);
       }}
       className="relative aspect-video w-full bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex items-center justify-center select-none group"
     >
@@ -205,13 +366,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         getStats={getStats}
         activeLayers={activeLayers}
         onRelayPolicyChange={() => {
-          if (status === 'playing' || status === 'connecting' || status === 'reconnecting') {
+          if (
+            playbackMode === 'webrtc' &&
+            (status === 'playing' || status === 'connecting' || status === 'reconnecting')
+          ) {
             retry();
           }
         }}
       />
 
-      {/* Persistent Video element (kept mounted through playing & reconnecting) */}
+      {/* Persistent Video element (kept mounted through playing & reconnecting & HLS fallback) */}
       <video
         ref={videoRef}
         autoPlay
@@ -220,8 +384,33 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         className={`w-full h-full object-contain ${showVideoElement ? 'block' : 'hidden'}`}
       />
 
+      {/* Latency / Transport Mode Badge (click to switch between WebRTC and HLS) */}
+      {isActivelyPlaying && (
+        <button
+          type="button"
+          onClick={playbackMode === 'webrtc' ? switchToHls : switchToWebRtc}
+          title={
+            playbackMode === 'webrtc'
+              ? 'Click to switch to HLS Compatibility mode'
+              : 'Click to switch back to WebRTC (low latency)'
+          }
+          className={`absolute top-4 left-4 z-20 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border backdrop-blur-md shadow transition ${
+            playbackMode === 'webrtc'
+              ? 'bg-emerald-950/80 border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/80'
+              : 'bg-amber-950/85 border-amber-500/40 text-amber-300 hover:bg-amber-900/85'
+          }`}
+        >
+          <span
+            className={`w-1.5 h-1.5 rounded-full ${
+              playbackMode === 'webrtc' ? 'bg-emerald-400' : 'bg-amber-400'
+            }`}
+          />
+          {playbackMode === 'webrtc' ? 'WebRTC (low latency)' : 'HLS (about 6-10 s delay)'}
+        </button>
+      )}
+
       {/* Prominent "Click to Unmute" banner for autoplay */}
-      {status === 'playing' && isMuted && (
+      {isActivelyPlaying && isMuted && (
         <button
           onClick={handleUnmute}
           className="absolute top-4 right-4 z-30 inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-black/80 hover:bg-black text-amber-300 border border-amber-500/40 text-xs font-semibold backdrop-blur-md shadow-lg transition-all transform hover:scale-105 active:scale-95"
@@ -235,7 +424,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       )}
 
       {/* Overlaid UI depending on state machine */}
-      {status === 'offline' && (
+      {playbackMode === 'webrtc' && status === 'offline' && (
         <div className="text-center p-6 space-y-4 max-w-sm">
           <div className="w-16 h-16 mx-auto rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500">
             <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -254,15 +443,18 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
-      {status === 'connecting' && (
+      {playbackMode === 'webrtc' && status === 'connecting' && (
         <div className="text-center p-6 space-y-3">
           <div className="w-10 h-10 mx-auto rounded-full border-2 border-purple-500 border-t-transparent animate-spin" />
           <p className="text-sm font-medium text-slate-300">Connecting to live stream...</p>
+          <p className="text-[11px] text-slate-500">
+            Falls back to HLS automatically if WebRTC takes over 8 seconds
+          </p>
         </div>
       )}
 
       {/* Non-destructive Reconnecting overlay over the live video element */}
-      {status === 'reconnecting' && (
+      {playbackMode === 'webrtc' && status === 'reconnecting' && (
         <div className="absolute inset-0 z-20 bg-black/65 backdrop-blur-[2px] flex items-center justify-center">
           <div className="text-center p-6 space-y-3">
             <div className="w-10 h-10 mx-auto rounded-full border-2 border-amber-500 border-t-transparent animate-spin" />
@@ -272,7 +464,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
-      {status === 'failed' && (
+      {playbackMode === 'webrtc' && status === 'failed' && (
         <div className="text-center p-6 space-y-3 max-w-sm">
           <div className="w-12 h-12 mx-auto rounded-full bg-rose-950/60 border border-rose-800 flex items-center justify-center text-rose-400">
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -280,14 +472,46 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </svg>
           </div>
           <p className="text-sm text-rose-300">{error || 'Unable to play stream'}</p>
-          <Button variant="secondary" size="sm" onClick={retry}>
-            Try Again
-          </Button>
+          <div className="flex items-center justify-center gap-2">
+            <Button variant="secondary" size="sm" onClick={retry}>
+              Try WebRTC Again
+            </Button>
+            <Button variant="primary" size="sm" onClick={switchToHls}>
+              Compatibility mode (HLS)
+            </Button>
+          </div>
         </div>
       )}
 
-      {/* Floating Controls Bar (visible when playing & controls visible) */}
-      {status === 'playing' && (
+      {/* HLS Loading & Error overlays */}
+      {playbackMode === 'hls' && hlsStatus === 'loading' && (
+        <div className="absolute inset-0 z-20 bg-black/70 flex items-center justify-center">
+          <div className="text-center p-6 space-y-3">
+            <div className="w-10 h-10 mx-auto rounded-full border-2 border-amber-400 border-t-transparent animate-spin" />
+            <p className="text-sm font-medium text-amber-200">Loading HLS compatibility stream...</p>
+            <Button variant="secondary" size="sm" onClick={switchToWebRtc}>
+              Switch back to WebRTC
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {playbackMode === 'hls' && hlsStatus === 'error' && (
+        <div className="text-center p-6 space-y-3 max-w-sm">
+          <p className="text-sm text-amber-300">{hlsError || 'Unable to load HLS stream'}</p>
+          <div className="flex items-center justify-center gap-2">
+            <Button variant="primary" size="sm" onClick={switchToWebRtc}>
+              Switch back to WebRTC
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => setPlaybackMode('hls')}>
+              Retry HLS
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Controls Bar (visible when playing in either WebRTC or HLS) */}
+      {isActivelyPlaying && (
         <div
           className={`absolute inset-x-0 bottom-0 z-20 p-4 bg-gradient-to-t from-black/90 via-black/50 to-transparent flex items-center justify-between gap-4 transition-opacity duration-300 ${
             showControls ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
@@ -308,7 +532,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             )}
           </div>
 
-          {/* Right: Stats toggle, Quality menu, Volume & Fullscreen controls */}
+          {/* Right: Stats toggle, Quality / Compatibility menu, Volume & Fullscreen controls */}
           <div className="flex items-center gap-3 sm:gap-4">
             {/* Network Stats Overlay Toggle */}
             <button
@@ -324,41 +548,63 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               <span>Stats</span>
             </button>
 
-            {/* Quality Selector Menu */}
+            {/* Quality & Compatibility Mode Selector Menu */}
             <div className="relative">
               <button
                 type="button"
                 onClick={() => setQualityMenuOpen((prev) => !prev)}
                 className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-black/60 hover:bg-slate-800 border border-slate-700/70 text-xs font-medium text-slate-200 transition-colors"
-                title="Video quality"
+                title="Video quality & playback mode"
               >
-                <span>{quality}</span>
-                {quality === 'Auto' && resolution && (
+                <span>{playbackMode === 'hls' ? 'HLS' : quality}</span>
+                {playbackMode === 'webrtc' && quality === 'Auto' && resolution && (
                   <span className="text-[10px] text-slate-400">({resolution.height}p)</span>
                 )}
               </button>
 
               {qualityMenuOpen && (
-                <div className="absolute right-0 bottom-9 w-36 rounded-lg bg-slate-900/95 border border-slate-700 shadow-xl py-1 backdrop-blur-md z-30">
+                <div className="absolute right-0 bottom-9 w-48 rounded-lg bg-slate-900/95 border border-slate-700 shadow-xl py-1 backdrop-blur-md z-30">
                   <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400 border-b border-slate-800">
                     Quality {layerLabel ? `(${layerLabel})` : ''}
                   </div>
-                  {QUALITY_OPTIONS.map((opt) => (
-                    <button
-                      key={opt}
-                      type="button"
-                      onClick={() => {
-                        setQuality(opt);
-                        setQualityMenuOpen(false);
-                      }}
-                      className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between hover:bg-slate-800 transition-colors ${
-                        quality === opt ? 'text-purple-400 font-semibold' : 'text-slate-200'
-                      }`}
-                    >
-                      <span>{opt}</span>
-                      {quality === opt && <span>✓</span>}
-                    </button>
-                  ))}
+                  {playbackMode === 'webrtc' &&
+                    QUALITY_OPTIONS.map((opt) => (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => {
+                          setQuality(opt);
+                          setQualityMenuOpen(false);
+                        }}
+                        className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between hover:bg-slate-800 transition-colors ${
+                          quality === opt ? 'text-purple-400 font-semibold' : 'text-slate-200'
+                        }`}
+                      >
+                        <span>{opt}</span>
+                        {quality === opt && <span>✓</span>}
+                      </button>
+                    ))}
+
+                  <div className="border-t border-slate-800 mt-1 pt-1">
+                    {playbackMode === 'webrtc' ? (
+                      <button
+                        type="button"
+                        onClick={switchToHls}
+                        className="w-full text-left px-3 py-1.5 text-xs text-amber-300 hover:bg-slate-800 transition-colors flex items-center justify-between"
+                      >
+                        <span>Compatibility mode (HLS)</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={switchToWebRtc}
+                        className="w-full text-left px-3 py-1.5 text-xs text-emerald-300 font-semibold hover:bg-slate-800 transition-colors flex items-center justify-between"
+                      >
+                        <span>WebRTC (low latency)</span>
+                        <span>↩</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
