@@ -20,7 +20,7 @@ import {
 import { redis } from '../lib/redis.js';
 import { notifyChannelOwnerFollow } from '../notifications/service.js';
 import { getViewerCount } from '../presence/service.js';
-import { getStreamState } from '../media/lifecycle.js';
+import { getStreamState, hasStreamLifecycle } from '../media/lifecycle.js';
 
 export async function getCategories(): Promise<CategoryDto[]> {
   const result = await db
@@ -413,8 +413,10 @@ export async function getLiveChannels(filters?: {
     .orderBy(desc(sql`COALESCE(${streams.startedAt}, ${channels.createdAt})`));
 
   const liveResults = results.filter((row) => {
-    const state = getStreamState(row.id);
-    if (state === 'OFFLINE' || state === 'ENDING') return false;
+    if (hasStreamLifecycle(row.id)) {
+      const state = getStreamState(row.id);
+      if (state === 'OFFLINE' || state === 'ENDING') return false;
+    }
     return true;
   });
 

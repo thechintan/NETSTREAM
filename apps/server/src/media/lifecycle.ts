@@ -26,6 +26,10 @@ export function getStreamState(channelId: string): StreamState {
   return channelLifecycles.get(channelId)?.state ?? 'OFFLINE';
 }
 
+export function hasStreamLifecycle(channelId: string): boolean {
+  return channelLifecycles.has(channelId);
+}
+
 /**
  * Checks whether a connecting publisher is allowed to reconnect
  * within their active grace period.

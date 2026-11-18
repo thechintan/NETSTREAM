@@ -8,6 +8,7 @@ export * from './room-manager.js';
 export * from './transport.js';
 export * from './handlers.js';
 export * from './lifecycle.js';
+export { recoverCrashedStreamsOnBoot, hasStreamLifecycle } from './lifecycle.js';
 
 let workerPool: WorkerPool | null = null;
 let roomManager: RoomManager | null = null;

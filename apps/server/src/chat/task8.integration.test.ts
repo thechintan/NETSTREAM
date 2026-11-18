@@ -295,7 +295,8 @@ describe('Task 8: Chat Rate Limiting, Slow Mode, Replay & Persistence Tests', ()
       });
     }
 
-    // Explicitly flush persistence worker to DB
+    // Wait briefly for queue ingestion, then explicitly flush persistence worker to DB
+    await new Promise((r) => setTimeout(r, 150));
     await getChatPersistenceWorker().flush();
 
     // Page 1: Query 3 newest messages

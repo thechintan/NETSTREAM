@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { AddressInfo } from 'node:net';
 import WebSocket from 'ws';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../app.js';
 import { createWsTicket } from '../auth/ticket.js';
 import { config } from '../config/index.js';
@@ -9,6 +9,7 @@ import { channels, closeDb, db, users } from '../db/index.js';
 import { runMigrations } from '../db/migrate.js';
 import { closeRedis } from '../lib/redis.js';
 import { getRoomManager, shutdownMedia } from './index.js';
+import { resetLifecycleForTest } from './lifecycle.js';
 
 describe('Task 12: Broadcaster Signaling Integration Tests', () => {
   let app: ReturnType<typeof buildApp>;
@@ -72,6 +73,23 @@ describe('Task 12: Broadcaster Signaling Integration Tests', () => {
     await app.listen({ port: 0, host: '127.0.0.1' });
     const address = app.server.address() as AddressInfo;
     wsBaseUrl = `ws://127.0.0.1:${address.port}/ws`;
+  });
+
+  async function closeWs(ws: WebSocket): Promise<void> {
+    if (ws.readyState === WebSocket.CLOSED) return;
+    await new Promise<void>((resolve) => {
+      ws.once('close', () => resolve());
+      ws.close();
+    });
+    await new Promise((r) => setTimeout(r, 50));
+  }
+
+  beforeEach(() => {
+    resetLifecycleForTest(channelAId);
+    const room = getRoomManager().get(channelAId);
+    if (room) {
+      getRoomManager().close(channelAId);
+    }
   });
 
   afterAll(async () => {
@@ -169,7 +187,7 @@ describe('Task 12: Broadcaster Signaling Integration Tests', () => {
       code: 'FORBIDDEN',
     });
 
-    otherWs.close();
+    await closeWs(otherWs);
   });
 
   it('2. Channel owner can join as publisher and receives routerRtpCapabilities', async () => {
@@ -197,7 +215,7 @@ describe('Task 12: Broadcaster Signaling Integration Tests', () => {
     expect(room).toBeDefined();
     expect(room?.publisher?.userId).toBe(userA.id);
 
-    ownerWs.close();
+    await closeWs(ownerWs);
   });
 
   it('3. Rejects second publisher with ALREADY_PUBLISHING', async () => {
@@ -228,8 +246,8 @@ describe('Task 12: Broadcaster Signaling Integration Tests', () => {
       code: 'ALREADY_PUBLISHING',
     });
 
-    ownerWs1.close();
-    ownerWs2.close();
+    await closeWs(ownerWs1);
+    await closeWs(ownerWs2);
   });
 
   it('4. Enforces per-connection cap of 2 transports', async () => {
@@ -267,7 +285,7 @@ describe('Task 12: Broadcaster Signaling Integration Tests', () => {
       code: 'TOO_MANY_TRANSPORTS',
     });
 
-    ownerWs.close();
+    await closeWs(ownerWs);
   });
 
   it('5. Handles media.connectTransport and enforces producer constraints in media.produce', async () => {
@@ -374,7 +392,7 @@ describe('Task 12: Broadcaster Signaling Integration Tests', () => {
     expect(prod2.d.id).toBeDefined();
     expect(room?.producers.size).toBe(2);
 
-    ownerWs.close();
+    await closeWs(ownerWs);
   });
 
   it('6. Cleanup on close: closes transports, producers, and clears publisher', async () => {
@@ -421,7 +439,8 @@ describe('Task 12: Broadcaster Signaling Integration Tests', () => {
       role: 'publisher',
     });
     expect(newJoin.d).toBeDefined();
-    expect(room.publisher?.userId).toBe(userA.id);
+    const updatedRoom = getRoomManager().get(channelAId);
+    expect(updatedRoom?.publisher?.userId).toBe(userA.id);
 
     newOwnerWs.close();
   });

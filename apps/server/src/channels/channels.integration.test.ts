@@ -368,7 +368,10 @@ describe('Channel, Category and Follow REST Endpoints', () => {
   });
 
   it('6. live list filtering: returns live channels and filters by category and q', async () => {
-    // We already have s1 and s2 live from previous test
+    // Ensure s1 and s2 are live
+    await db.update(channels).set({ isLive: true }).where(eq(channels.name, `s1_${ts}`));
+    await db.update(channels).set({ isLive: true }).where(eq(channels.name, `s2_${ts}`));
+
     const allLiveRes = await app.inject({
       method: 'GET',
       url: '/api/live',
