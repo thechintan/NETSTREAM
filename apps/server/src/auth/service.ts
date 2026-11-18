@@ -318,6 +318,7 @@ export async function getMe(userId: string) {
       categoryId: channels.categoryId,
       isLive: channels.isLive,
       slowSeconds: channels.slowSeconds,
+      recordVod: channels.recordVod,
       createdAt: channels.createdAt,
     })
     .from(channels)

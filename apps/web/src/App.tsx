@@ -12,6 +12,7 @@ import { Category } from './pages/Category';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { Channel } from './pages/Channel';
+import { Vod } from './pages/Vod';
 import { Studio } from './pages/Studio';
 import { Settings } from './pages/Settings';
 import { NotFound } from './pages/NotFound';
@@ -30,6 +31,7 @@ export const App: React.FC = () => {
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
                 <Route path="/c/:name" element={<Channel />} />
+                <Route path="/vod/:id" element={<Vod />} />
                 <Route
                   path="/studio"
                   element={

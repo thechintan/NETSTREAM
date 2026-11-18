@@ -20,6 +20,7 @@ export const Settings: React.FC = () => {
   const [title, setTitle] = useState(channel?.title || '');
   const [categoryId, setCategoryId] = useState(channel?.categoryId || '');
   const [slowSeconds, setSlowSeconds] = useState(channel?.slowSeconds ?? 0);
+  const [recordVod, setRecordVod] = useState(channel?.recordVod ?? true);
   const [isLoadingCategories, setIsLoadingCategories] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isRotating, setIsRotating] = useState(false);
@@ -40,6 +41,7 @@ export const Settings: React.FC = () => {
       setTitle(channel.title || '');
       setCategoryId(channel.categoryId || '');
       setSlowSeconds(channel.slowSeconds ?? 0);
+      setRecordVod(channel.recordVod ?? true);
     }
   }, [channel]);
 
@@ -107,6 +109,7 @@ export const Settings: React.FC = () => {
         title: title.trim(),
         categoryId: categoryId || null,
         slowSeconds: Number(slowSeconds) || 0,
+        recordVod,
       });
       await refreshUser();
       showToast('Channel updated successfully', 'success');
@@ -261,6 +264,27 @@ export const Settings: React.FC = () => {
             <p className="text-xs text-gray-500 mt-1">
               Limits chat participants to sending at most one message per interval. Set to 0 to disable slow mode.
             </p>
+          </div>
+
+          <div className="flex items-start justify-between gap-4 p-3.5 rounded-lg bg-gray-950/60 border border-gray-800">
+            <div>
+              <label
+                htmlFor="recordVod"
+                className="block text-sm font-medium text-gray-200 cursor-pointer"
+              >
+                Record Past Broadcasts (VOD)
+              </label>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Automatically save live streams (10 seconds or longer) as watchable VODs on your channel page.
+              </p>
+            </div>
+            <input
+              id="recordVod"
+              type="checkbox"
+              checked={recordVod}
+              onChange={(e) => setRecordVod(e.target.checked)}
+              className="mt-1 h-4 w-4 rounded border-gray-600 bg-gray-800 text-purple-500 focus:ring-purple-500 cursor-pointer"
+            />
           </div>
 
           <div className="flex justify-end pt-2">

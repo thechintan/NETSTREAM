@@ -49,6 +49,7 @@ export const channelDtoSchema = z.object({
   categoryId: z.string().uuid().nullable(),
   isLive: z.boolean(),
   slowSeconds: z.number(),
+  recordVod: z.boolean().optional(),
   createdAt: z.union([z.string(), z.date()]),
 });
 

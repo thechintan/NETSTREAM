@@ -9,7 +9,11 @@ import { registerNotificationHandlers, registerNotificationRoutes } from './noti
 import { initPresenceWorker, registerPresenceHandlers } from './presence/index.js';
 import { initMedia, registerMediaHandlers, shutdownMedia, recoverCrashedStreamsOnBoot } from './media/index.js';
 import { registerMediaRoutes } from './media/routes.js';
-import { getHlsPipelineManager, registerHlsRoutes } from './recording/index.js';
+import {
+  getHlsPipelineManager,
+  registerHlsRoutes,
+  startVodRetentionScheduler,
+} from './recording/index.js';
 import { config } from './config/index.js';
 import { pingDb } from './db/index.js';
 import { pingRedis } from './lib/redis.js';
@@ -46,13 +50,17 @@ export function buildApp(gatewayOptions?: GatewayOptions): FastifyInstance & { g
     void gateway.handleUpgrade(req, socket, head);
   });
 
+  let vodRetentionHandle: { stop: () => void } | null = null;
+
   app.addHook('onReady', async () => {
     await initMedia();
     getHlsPipelineManager().init();
     await recoverCrashedStreamsOnBoot();
+    vodRetentionHandle = startVodRetentionScheduler();
   });
 
   app.addHook('onClose', async () => {
+    vodRetentionHandle?.stop();
     await getHlsPipelineManager().shutdown();
     await gateway.close();
     await getChatPersistenceWorker().close();

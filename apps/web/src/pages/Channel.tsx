@@ -1,6 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { ChannelDetailDto, StreamLivePayload, StreamOfflinePayload, ViewersCountPayload } from '@netstream/shared';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import {
+  ChannelDetailDto,
+  StreamLivePayload,
+  StreamOfflinePayload,
+  ViewersCountPayload,
+  VodDto,
+} from '@netstream/shared';
 import { Avatar } from '../components/ui/Avatar';
 import { Button } from '../components/ui/Button';
 import { Skeleton } from '../components/ui/Skeleton';
@@ -23,6 +29,10 @@ export const Channel: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [followLoading, setFollowLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'live' | 'vods'>('live');
+  const [vods, setVods] = useState<VodDto[]>([]);
+  const [vodsLoading, setVodsLoading] = useState(false);
+  const [deletingVodId, setDeletingVodId] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -89,6 +99,51 @@ export const Channel: React.FC = () => {
       unsubOffline();
     };
   }, [channel?.id, client]);
+
+  // Fetch past broadcasts (VODs) for this channel
+  useEffect(() => {
+    if (!channel?.id) return;
+    let isMounted = true;
+    setVodsLoading(true);
+    api
+      .get<VodDto[]>(`/api/channels/${channel.id}/vods`)
+      .then((list) => {
+        if (isMounted) setVods(list || []);
+      })
+      .catch(() => {
+        if (isMounted) setVods([]);
+      })
+      .finally(() => {
+        if (isMounted) setVodsLoading(false);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [channel?.id]);
+
+  const handleDeleteVod = async (vodId: string) => {
+    if (!confirm('Delete this recorded broadcast permanently?')) return;
+    setDeletingVodId(vodId);
+    try {
+      await api.delete(`/api/vods/${vodId}`);
+      setVods((prev) => prev.filter((v) => v.id !== vodId));
+      showToast('VOD deleted', 'info');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to delete VOD', 'error');
+    } finally {
+      setDeletingVodId(null);
+    }
+  };
+
+  const formatVodDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    const hrs = Math.floor(mins / 60);
+    if (hrs > 0) {
+      return `${hrs}:${(mins % 60).toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
   const handleToggleFollow = async () => {
     if (!user) {
@@ -234,6 +289,108 @@ export const Channel: React.FC = () => {
               </Button>
             )}
           </div>
+        </div>
+
+        {/* Channel Tabs: Live / Past broadcasts */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
+          <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+            <button
+              type="button"
+              onClick={() => setActiveTab('live')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                activeTab === 'live'
+                  ? 'bg-indigo-600 text-white'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+              }`}
+            >
+              About Channel
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('vods')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                activeTab === 'vods'
+                  ? 'bg-indigo-600 text-white'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+              }`}
+            >
+              Past broadcasts ({vods.length})
+            </button>
+          </div>
+
+          {activeTab === 'live' ? (
+            <p className="text-xs text-slate-400">
+              {channel.isLive
+                ? `${channel.name} is currently live streaming "${channel.title}".`
+                : `${channel.name} is offline. Check the Past broadcasts tab to watch recent recorded streams.`}
+            </p>
+          ) : vodsLoading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Skeleton className="h-32 rounded-xl" />
+              <Skeleton className="h-32 rounded-xl" />
+            </div>
+          ) : vods.length === 0 ? (
+            <p className="text-xs text-slate-500 py-4 text-center">
+              No past broadcasts recorded yet.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {vods.map((vod) => (
+                <div
+                  key={vod.id}
+                  className="bg-slate-950/70 border border-slate-800 rounded-xl overflow-hidden flex flex-col justify-between group hover:border-indigo-500/50 transition"
+                >
+                  <Link to={`/vod/${vod.id}`} className="block">
+                    <div className="relative aspect-video bg-slate-900 flex items-center justify-center">
+                      <svg
+                        className="w-10 h-10 text-slate-600 group-hover:text-indigo-400 transition"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={1.5}
+                          d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
+                        />
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={1.5}
+                          d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                        />
+                      </svg>
+                      <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-black/80 text-[11px] font-mono text-white">
+                        {formatVodDuration(vod.durationS)}
+                      </span>
+                    </div>
+                    <div className="p-3 space-y-1">
+                      <p className="text-sm font-semibold text-slate-100 truncate group-hover:text-indigo-300">
+                        {vod.title}
+                      </p>
+                      <p className="text-[11px] text-slate-400">
+                        {new Date(vod.createdAt).toLocaleString()}
+                      </p>
+                    </div>
+                  </Link>
+                  {isOwner && (
+                    <div className="px-3 pb-3 flex justify-end">
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        isLoading={deletingVodId === vod.id}
+                        onClick={() => void handleDeleteVod(vod.id)}
+                        className="text-xs"
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

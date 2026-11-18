@@ -172,6 +172,9 @@ export async function updateMyChannel(
   if (input.slowSeconds !== undefined) {
     updateValues.slowSeconds = input.slowSeconds;
   }
+  if (input.recordVod !== undefined) {
+    updateValues.recordVod = input.recordVod;
+  }
 
   if (Object.keys(updateValues).length > 0) {
     await db

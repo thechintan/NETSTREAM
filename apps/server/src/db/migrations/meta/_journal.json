@@ -15,6 +15,13 @@
       "when": 1795006800000,
       "tag": "0001_trgm_discovery",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795021200000,
+      "tag": "0002_channel_record_vod",
+      "breakpoints": true
     }
   ]
 }

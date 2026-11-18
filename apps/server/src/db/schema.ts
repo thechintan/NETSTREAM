@@ -51,6 +51,7 @@ export const channels = pgTable(
     streamKeyHash: text('stream_key_hash').notNull(),
     isLive: boolean('is_live').notNull().default(false),
     slowSeconds: integer('slow_seconds').notNull().default(0),
+    recordVod: boolean('record_vod').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [

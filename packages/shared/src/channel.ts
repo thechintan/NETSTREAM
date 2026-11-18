@@ -52,6 +52,7 @@ export const updateChannelSchema = z.object({
     .min(0, 'Slow mode seconds cannot be negative')
     .max(120, 'Slow mode seconds cannot exceed 120')
     .optional(),
+  recordVod: z.boolean().optional(),
 });
 
 export type UpdateChannelInput = z.infer<typeof updateChannelSchema>;
@@ -135,3 +136,20 @@ export const searchResponseDtoSchema = z.object({
 });
 
 export type SearchResponseDto = z.infer<typeof searchResponseDtoSchema>;
+
+// VODs (Task 23)
+export const vodDtoSchema = z.object({
+  id: z.string().uuid(),
+  streamId: z.string().uuid(),
+  channelId: z.string().uuid(),
+  channelName: z.string(),
+  ownerUsername: z.string(),
+  ownerId: z.string().uuid().optional(),
+  title: z.string(),
+  path: z.string(),
+  playlistUrl: z.string(),
+  durationS: z.number().int().min(0),
+  createdAt: z.union([z.string(), z.date()]),
+});
+
+export type VodDto = z.infer<typeof vodDtoSchema>;

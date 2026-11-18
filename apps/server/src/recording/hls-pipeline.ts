@@ -10,10 +10,12 @@ import {
 } from './ffmpeg-manager.js';
 import { PortAllocator } from './port-allocator.js';
 import { buildSdp, type SdpMediaStreamInput } from './sdp.js';
+import { finalizeVodRecording, resolveSafeVodDir } from './vod-service.js';
 
 interface ChannelHlsSession {
   channelId: string;
   outputDir: string;
+  vodStreamId?: string;
   transports: PlainTransport[];
   consumers: Consumer[];
   allocatedRtpPorts: number[];
@@ -67,7 +69,11 @@ export class HlsPipelineManager {
     return this.enabled;
   }
 
-  public async startForChannel(channelId: string, room: Room): Promise<boolean> {
+  public async startForChannel(
+    channelId: string,
+    room: Room,
+    options?: { streamId?: string; recordVod?: boolean }
+  ): Promise<boolean> {
     if (!this.initialized) {
       this.init();
     }
@@ -93,6 +99,8 @@ export class HlsPipelineManager {
     let videoConsumer: Consumer | undefined;
 
     const outputDir = path.resolve(config.HLS_DIR, channelId);
+    const vodStreamId = options?.recordVod && options?.streamId ? options.streamId : undefined;
+    const vodOutputDir = vodStreamId ? resolveSafeVodDir(config.VOD_DIR, vodStreamId) ?? undefined : undefined;
 
     try {
       const targetProducers = [videoProducer, ...(audioProducer ? [audioProducer] : [])];
@@ -145,6 +153,9 @@ export class HlsPipelineManager {
       }
 
       await fs.mkdir(outputDir, { recursive: true });
+      if (vodOutputDir) {
+        await fs.mkdir(vodOutputDir, { recursive: true });
+      }
       const sdpPath = path.join(outputDir, 'stream.sdp');
       const sdpContent = buildSdp(sdpStreams, `NetStream Live - ${channelId}`);
       await fs.writeFile(sdpPath, sdpContent, 'utf8');
@@ -153,6 +164,7 @@ export class HlsPipelineManager {
         channelId,
         sdpPath,
         outputDir,
+        vodOutputDir,
         hasVideo: Boolean(videoProducer),
         hasAudio: Boolean(audioProducer),
         onRespawn: () => {
@@ -180,6 +192,7 @@ export class HlsPipelineManager {
       this.sessions.set(channelId, {
         channelId,
         outputDir,
+        vodStreamId,
         transports,
         consumers,
         allocatedRtpPorts,
@@ -214,9 +227,11 @@ export class HlsPipelineManager {
   }
 
   public async stopForChannel(channelId: string): Promise<void> {
-    this.ffmpeg.stop(channelId);
+    await this.ffmpeg.stop(channelId);
 
     const session = this.sessions.get(channelId);
+    const vodStreamId = session?.vodStreamId;
+
     if (session) {
       if (session.keyFrameTimer) {
         clearTimeout(session.keyFrameTimer);
@@ -241,7 +256,19 @@ export class HlsPipelineManager {
       this.sessions.delete(channelId);
     }
 
-    // Remove the channel's HLS directory after stream ends
+    // Finalize VOD recording (measure duration with ffprobe, discard < 10s, else insert vods row)
+    if (vodStreamId) {
+      try {
+        await finalizeVodRecording({
+          streamId: vodStreamId,
+          channelId,
+        });
+      } catch {
+        // ignore VOD finalization errors so stream teardown completes cleanly
+      }
+    }
+
+    // Remove the channel's live HLS directory after stream ends (VOD keeps its own copy in VOD_DIR)
     const outputDir = path.resolve(config.HLS_DIR, channelId);
     try {
       await fs.rm(outputDir, { recursive: true, force: true });

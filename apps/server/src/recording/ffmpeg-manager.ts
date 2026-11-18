@@ -27,6 +27,7 @@ export interface StartFfmpegOptions {
   channelId: string;
   sdpPath: string;
   outputDir: string;
+  vodOutputDir?: string;
   hasVideo: boolean;
   hasAudio: boolean;
   onRespawn?: () => void;
@@ -65,6 +66,7 @@ export function checkFfmpegAvailable(ffmpegBinary = 'ffmpeg'): {
 export function buildHlsFfmpegArgs(options: {
   sdpPath: string;
   outputDir: string;
+  vodOutputDir?: string;
   hasVideo: boolean;
   hasAudio: boolean;
 }): string[] {
@@ -79,47 +81,75 @@ export function buildHlsFfmpegArgs(options: {
     options.sdpPath,
   ];
 
-  if (options.hasVideo) {
-    args.push(
-      '-map',
-      '0:v:0',
-      '-c:v',
-      'libx264',
-      '-preset',
-      'veryfast',
-      '-tune',
-      'zerolatency',
-      '-pix_fmt',
-      'yuv420p',
-      '-g',
-      '60',
-      '-keyint_min',
-      '60',
-      '-sc_threshold',
-      '0'
-    );
+  const appendEncodeAndHls = (
+    targetDir: string,
+    mode: 'live' | 'vod'
+  ) => {
+    if (options.hasVideo) {
+      args.push(
+        '-map',
+        '0:v:0',
+        '-c:v',
+        'libx264',
+        '-preset',
+        'veryfast',
+        '-tune',
+        'zerolatency',
+        '-pix_fmt',
+        'yuv420p',
+        '-g',
+        '60',
+        '-keyint_min',
+        '60',
+        '-sc_threshold',
+        '0'
+      );
+    }
+
+    if (options.hasAudio) {
+      args.push('-map', '0:a:0', '-c:a', 'aac', '-ar', '48000', '-b:a', '128k');
+    }
+
+    const segmentPattern = path.join(targetDir, 'seg_%05d.ts');
+    const playlistPath = path.join(targetDir, 'index.m3u8');
+
+    if (mode === 'live') {
+      args.push(
+        '-f',
+        'hls',
+        '-hls_time',
+        '2',
+        '-hls_list_size',
+        '6',
+        '-hls_flags',
+        'delete_segments+append_list+independent_segments',
+        '-hls_segment_filename',
+        segmentPattern,
+        playlistPath
+      );
+    } else {
+      args.push(
+        '-f',
+        'hls',
+        '-hls_time',
+        '2',
+        '-hls_list_size',
+        '0',
+        '-hls_playlist_type',
+        'event',
+        '-hls_flags',
+        'independent_segments',
+        '-hls_segment_filename',
+        segmentPattern,
+        playlistPath
+      );
+    }
+  };
+
+  appendEncodeAndHls(options.outputDir, 'live');
+  if (options.vodOutputDir) {
+    appendEncodeAndHls(options.vodOutputDir, 'vod');
   }
-
-  if (options.hasAudio) {
-    args.push('-map', '0:a:0', '-c:a', 'aac', '-ar', '48000', '-b:a', '128k');
-  }
-
-  const segmentPattern = path.join(options.outputDir, 'seg_%05d.ts');
-  const playlistPath = path.join(options.outputDir, 'index.m3u8');
-
-  args.push(
-    '-f',
-    'hls',
-    '-hls_time',
-    '2',
-    '-hls_list_size',
-    '6',
-    '-hls_flags',
-    'delete_segments+append_list+independent_segments',
-    '-hls_segment_filename',
-    segmentPattern,
-    playlistPath
-  );
 
   return args;
 }
@@ -226,33 +256,49 @@ export class FfmpegProcessManager {
     });
   }
 
-  public stop(channelId: string): void {
+  public stop(channelId: string): Promise<void> {
     const entry = this.processes.get(channelId);
-    if (!entry) return;
+    if (!entry) return Promise.resolve();
 
     entry.stopping = true;
     this.processes.delete(channelId);
 
-    try {
-      entry.child.kill('SIGTERM');
-      entry.killTimer = setTimeout(() => {
-        try {
-          if (!entry.child.killed) {
-            entry.child.kill('SIGKILL');
-          }
-        } catch {
-          // ignore
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        if (entry.killTimer) {
+          clearTimeout(entry.killTimer);
+          entry.killTimer = null;
         }
-      }, this.killGraceMs);
-      entry.killTimer.unref?.();
-    } catch {
-      // ignore if already exited
-    }
+        resolve();
+      };
+
+      entry.child.once('exit', done);
+
+      try {
+        entry.child.kill('SIGTERM');
+        entry.killTimer = setTimeout(() => {
+          try {
+            if (!entry.child.killed) {
+              entry.child.kill('SIGKILL');
+            }
+          } catch {
+            // ignore
+          }
+          done();
+        }, this.killGraceMs);
+        entry.killTimer.unref?.();
+      } catch {
+        done();
+      }
+    });
   }
 
   public stopAll(): void {
     for (const channelId of [...this.processes.keys()]) {
-      this.stop(channelId);
+      void this.stop(channelId);
     }
   }
 

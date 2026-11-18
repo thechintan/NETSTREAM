@@ -120,6 +120,7 @@ export async function onVideoProducerCreated(
       name: channels.name,
       title: channels.title,
       ownerId: channels.ownerId,
+      recordVod: channels.recordVod,
       ownerUsername: users.username,
       categoryId: categories.id,
       categoryName: categories.name,
@@ -183,11 +184,14 @@ export async function onVideoProducerCreated(
     // Non-fatal if follower notification fails
   }
 
-  // 7. Start HLS transcoding pipeline if HLS_ENABLED=true and FFmpeg is available
+  // 7. Start HLS transcoding (and VOD recording if channel.recordVod is enabled)
   try {
     const room = getRoomManager().get(channelId);
     if (room) {
-      void getHlsPipelineManager().startForChannel(channelId, room);
+      void getHlsPipelineManager().startForChannel(channelId, room, {
+        streamId: lifecycle.streamId,
+        recordVod: channelData.recordVod,
+      });
     }
   } catch {
     // Non-fatal if room manager or FFmpeg unavailable

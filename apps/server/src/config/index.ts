@@ -36,6 +36,7 @@ export const envSchema = z.object({
     .default(true),
   HLS_DIR: z.string().default('./media/hls'),
   VOD_DIR: z.string().default('./media/vod'),
+  VOD_RETENTION_DAYS: z.coerce.number().int().min(1).default(7),
   LOG_LEVEL: z
     .enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal'])
     .default('info'),

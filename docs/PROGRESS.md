@@ -609,5 +609,16 @@
      - **HLS (`HLS (about 6-10 s delay)`)**: ~6–10 s end-to-end latency (2-second segments, 3-segment live sync buffer).
    - Click the `HLS (about 6-10 s delay)` badge (or choose **WebRTC (low latency)** in the quality menu) to switch back.
 
+### Verification of VOD Recording & Playback (Task 23)
+
+1. **Run Unit Tests**:
+   ```bash
+   pnpm --filter @netstream/server test run src/recording/vod.test.ts
+   ```
+2. **Manual Verification**:
+   - Ensure FFmpeg/ffprobe are installed on `PATH` and **Record Past Broadcasts (VOD)** is enabled in `/settings` (on by default).
+   - Go live in `/studio` for ~30 seconds, then click **End Stream**.
+   - Open your channel page (`/c/<name>`), click the **Past broadcasts** tab, and click the recorded broadcast to open `/vod/<id>` and verify `hls.js` playback, seek bar, ±10s controls, title, date, duration, and owner Delete button.
+
 
 
