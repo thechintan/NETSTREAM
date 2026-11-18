@@ -6,6 +6,7 @@ export * from './types.js';
 export * from './worker-pool.js';
 export * from './room-manager.js';
 export * from './transport.js';
+export * from './handlers.js';
 
 let workerPool: WorkerPool | null = null;
 let roomManager: RoomManager | null = null;

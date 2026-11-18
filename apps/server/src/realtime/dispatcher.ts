@@ -3,6 +3,7 @@ import {
   ClientMessage,
   ClientMessageType,
   WS_CLOSE_CODES,
+  WsErrorCode,
   wsEnvelopeSchema,
 } from '@netstream/shared';
 import { Conn } from './conn.js';
@@ -29,6 +30,17 @@ export class RateLimiter {
     }
     this.count += 1;
     return this.count <= this.maxPerSecond;
+  }
+}
+
+export class WsHandlerError extends Error {
+  constructor(
+    public readonly code: WsErrorCode,
+    message: string,
+    public readonly retryAfterMs?: number
+  ) {
+    super(message);
+    this.name = 'WsHandlerError';
   }
 }
 
@@ -127,10 +139,23 @@ export class Dispatcher {
     // 5. Execute handler
     try {
       const result = await handler(conn, validMsg);
-      if (id) {
+      if (id && result !== undefined) {
         conn.ack(id, result ?? {});
       }
     } catch (err: unknown) {
+      if (err instanceof WsHandlerError) {
+        if (id) {
+          conn.fail(id, err.code, err.message, err.retryAfterMs);
+        }
+        return;
+      }
+      if (err && typeof err === 'object' && 'code' in err) {
+        const custom = err as { code: WsErrorCode; message: string; retryAfterMs?: number };
+        if (id) {
+          conn.fail(id, custom.code, custom.message, custom.retryAfterMs);
+        }
+        return;
+      }
       const message = err instanceof Error ? err.message : 'Internal server error';
       if (id) {
         conn.fail(id, 'INTERNAL_ERROR', message);

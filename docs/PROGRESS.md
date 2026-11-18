@@ -225,6 +225,24 @@
     - Clean room closure and transport termination.
     - Clean worker pool shutdown with zero open handles.
   - All 10 test files / 60 tests pass across the monorepo; ESLint 0 warnings/errors; TypeScript typecheck passes; Vite production build succeeds.
+- Implemented Broadcaster Signaling and Studio Page (TASK 12):
+  - Shared Protocol (`packages/shared/src/protocol.ts`):
+    - Replaced `media.*` placeholders with typed schemas: `media.join` (`channelId`, `role: 'publisher' | 'viewer'`), `media.createTransport` (`direction: 'send' | 'recv'`), `media.connectTransport` (`transportId`, `dtlsParameters`), and `media.produce` (`transportId`, `kind: 'audio' | 'video'`, `rtpParameters`, `appData?`).
+    - Added error codes `'ALREADY_PUBLISHING'`, `'TOO_MANY_TRANSPORTS'`, `'PRODUCER_EXISTS'` to `WsErrorCode`.
+  - Server Media Signaling (`apps/server/src/media/handlers.ts`):
+    - `media.join`: verifies authenticated channel ownership (rejects non-owners and guests with `FORBIDDEN`); checks `room.publisher` and rejects concurrent publisher with `ALREADY_PUBLISHING`; returns `{ routerRtpCapabilities }`.
+    - `media.createTransport`: enforces per-connection cap of 2 transports (`TOO_MANY_TRANSPORTS`), calls `createWebRtcTransport`, stores transport in `conn.state.media.transports`.
+    - `media.connectTransport`: connects transport with client DTLS parameters.
+    - `media.produce`: verifies publisher role and send direction; enforces max one audio and one video producer (`PRODUCER_EXISTS`); produces track and tracks in `room.producers` and connection state; cleans up on `'transportclose'`.
+    - Disconnect cleanup hook (`gateway.onCleanup`): terminates transports and producers on publisher disconnect and clears `room.publisher`.
+  - Web Client Studio (`apps/web`):
+    - Installed exact `mediasoup-client@3.7.18`.
+    - Built `usePublisher` hook (`apps/web/src/features/studio/usePublisher.ts`): manages `Device` loading, send transport creation, DTLS connect and produce event callbacks over WebSocket, track production with `maxBitrate: 2_500_000`, track replacement for screen sharing, and clean teardown on unmount.
+    - Built Studio Page (`apps/web/src/pages/Studio.tsx`): live preview video, camera & microphone pickers (`enumerateDevices`), screen sharing toggle (`getDisplayMedia`), "Go Live" / "End Stream" button, stream title & category from channel settings, status indicator (`idle`, `connecting`, `live`, `error`), and user-friendly permission error notices.
+  - Tests:
+    - 4 unit tests with mocked mediasoup objects (`apps/server/src/media/signaling.mock.test.ts`): non-owner rejection, second publisher rejection, transport cap, and cleanup on close.
+    - 6 end-to-end integration tests with real WebSockets and mediasoup workers (`apps/server/src/media/signaling.integration.test.ts`).
+  - Monorepo Verification: All 12 test files / 70 tests pass; ESLint 0 warnings/errors; TypeScript typecheck clean; Vite production bundle built successfully.
 
 ## Decisions
 - **Mediasoup Prebuilt Binary Strategy**: Pinned exact version `mediasoup@3.15.2`. On Windows, the npm postinstall script automatically fetches precompiled native worker binaries (`mediasoup-worker-3.15.2-win32-x64.tgz`) from GitHub releases, avoiding external MSVC compilation toolchain failures while supporting full C++ performance.

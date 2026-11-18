@@ -22,7 +22,10 @@ export type WsErrorCode =
   | 'TIMED_OUT'
   | 'INTERNAL_ERROR'
   | 'TIMEOUT'
-  | 'UNKNOWN_TYPE';
+  | 'UNKNOWN_TYPE'
+  | 'ALREADY_PUBLISHING'
+  | 'TOO_MANY_TRANSPORTS'
+  | 'PRODUCER_EXISTS';
 
 // Generic envelope schema
 export const wsEnvelopeSchema = z.object({
@@ -169,11 +172,53 @@ export const streamOfflinePayloadSchema = z.object({
 
 export type StreamOfflinePayload = z.infer<typeof streamOfflinePayloadSchema>;
 
-// TODO: Define strict mediasoup types in media task
-export const mediaJoinPayloadSchema = z.any();
-export const mediaCreateTransportPayloadSchema = z.any();
-export const mediaConnectTransportPayloadSchema = z.any();
-export const mediaProducePayloadSchema = z.any();
+// Real payload schemas for media.* signaling
+export const mediaJoinPayloadSchema = z.object({
+  channelId: z.string().uuid(),
+  role: z.enum(['publisher', 'viewer']),
+});
+export type MediaJoinPayload = z.infer<typeof mediaJoinPayloadSchema>;
+
+export const mediaCreateTransportPayloadSchema = z.object({
+  direction: z.enum(['send', 'recv']),
+});
+export type MediaCreateTransportPayload = z.infer<typeof mediaCreateTransportPayloadSchema>;
+
+export const mediaConnectTransportPayloadSchema = z.object({
+  transportId: z.string().min(1),
+  dtlsParameters: z.record(z.unknown()),
+});
+export type MediaConnectTransportPayload = z.infer<typeof mediaConnectTransportPayloadSchema>;
+
+export const mediaProducePayloadSchema = z.object({
+  transportId: z.string().min(1),
+  kind: z.enum(['audio', 'video']),
+  rtpParameters: z.record(z.unknown()),
+  appData: z.record(z.unknown()).optional(),
+});
+export type MediaProducePayload = z.infer<typeof mediaProducePayloadSchema>;
+
+// Media responses
+export interface MediaJoinResponse {
+  routerRtpCapabilities: unknown;
+}
+
+export interface MediaCreateTransportResponse {
+  id: string;
+  iceParameters: unknown;
+  iceCandidates: unknown[];
+  dtlsParameters: unknown;
+}
+
+export interface MediaConnectTransportResponse {
+  connected: boolean;
+}
+
+export interface MediaProduceResponse {
+  id: string;
+}
+
+// Viewer signaling placeholders (tightened in later tasks)
 export const mediaConsumePayloadSchema = z.any();
 export const mediaResumePayloadSchema = z.any();
 export const mediaSetLayersPayloadSchema = z.any();

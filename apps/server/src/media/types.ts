@@ -46,6 +46,18 @@ export interface CreateWebRtcTransportResult {
   dtlsParameters: DtlsParameters;
 }
 
+export interface ConnTransportEntry {
+  transport: WebRtcTransport;
+  direction: 'send' | 'recv';
+}
+
+export interface ConnMediaState {
+  channelId: string;
+  role: 'publisher' | 'viewer';
+  transports: Map<string, ConnTransportEntry>;
+  producers: Map<string, Producer>;
+}
+
 export interface DebugWorkerInfo {
   pid: number;
   routerCount: number;
