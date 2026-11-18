@@ -620,5 +620,15 @@
    - Go live in `/studio` for ~30 seconds, then click **End Stream**.
    - Open your channel page (`/c/<name>`), click the **Past broadcasts** tab, and click the recorded broadcast to open `/vod/<id>` and verify `hls.js` playback, seek bar, ±10s controls, title, date, duration, and owner Delete button.
 
+### Verification of Python TCP & UDP Labs (Tasks 24–25)
+
+1. **Run Pytest Suites**:
+   ```bash
+   python -m pytest lab/tcp/test_tcp.py lab/udp/test_udp.py -v
+   ```
+2. **CLI Quick Checks**:
+   - TCP: place a test file in `lab/videos`, start `python lab/tcp/server.py`, run `python lab/tcp/client.py list`, `python lab/tcp/client.py get <file>`, and `python lab/tcp/multi_client.py <file> -n 3`; inspect `lab/results/tcp_results.csv`.
+   - UDP: run `python lab/udp/run_matrix.py --payload-sizes 256 1024 --counts 500 --sim-drops 0.0 0.05 --runs 2 --ack` and inspect `lab/results/udp_results.csv` (confirm `SIMULATED_*` columns are clearly labelled).
+
 
 
