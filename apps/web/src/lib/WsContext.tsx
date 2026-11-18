@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import { ClientMessageType } from '@netstream/shared';
+import { useAuth } from '../features/auth/AuthContext';
 import { WsClient, WsStatus } from './ws';
 
 interface WsContextValue {
@@ -12,14 +13,11 @@ interface WsContextValue {
 const WsContext = createContext<WsContextValue | null>(null);
 
 export const WsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuth();
   const [client] = useState(() => new WsClient());
   const [status, setStatus] = useState<WsStatus>(client.getStatus());
-  const hasMountedRef = useRef(false);
 
   useEffect(() => {
-    if (hasMountedRef.current) return;
-    hasMountedRef.current = true;
-
     const unsub = client.on('status', (newStatus: WsStatus) => {
       setStatus(newStatus);
     });
@@ -30,7 +28,7 @@ export const WsProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       unsub();
       client.disconnect();
     };
-  }, [client]);
+  }, [client, user?.id]);
 
   const value: WsContextValue = {
     client,

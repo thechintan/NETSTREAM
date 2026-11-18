@@ -82,6 +82,28 @@ export function usePublisher({ channelId }: UsePublisherOptions) {
       activeStreamRef.current = stream;
 
       try {
+        // Ensure WebSocket is open before sending signaling requests
+        if (ws.client.getStatus() !== 'open') {
+          void ws.client.connect();
+          await new Promise<void>((resolve, reject) => {
+            if (ws.client.getStatus() === 'open') {
+              resolve();
+              return;
+            }
+            const timeout = setTimeout(() => {
+              unsub();
+              reject(new Error('WebSocket is not connected. Re-establishing connection...'));
+            }, 6000);
+            const unsub = ws.client.on('status', (newStatus) => {
+              if (newStatus === 'open') {
+                clearTimeout(timeout);
+                unsub();
+                resolve();
+              }
+            });
+          });
+        }
+
         // 1. media.join as publisher
         const joinRes = await ws.request<MediaJoinResponse>('media.join', {
           channelId,

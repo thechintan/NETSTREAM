@@ -59,6 +59,19 @@ export function buildApp(gatewayOptions?: GatewayOptions): FastifyInstance & { g
     secret: config.COOKIE_SECRET,
   });
 
+  // Support empty JSON bodies without throwing FST_ERR_CTP_EMPTY_JSON_BODY
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+    if (!body || (typeof body === 'string' && body.trim().length === 0)) {
+      done(null, {});
+      return;
+    }
+    try {
+      done(null, JSON.parse(body as string));
+    } catch (err) {
+      done(err as Error, undefined);
+    }
+  });
+
   // Register auth and session routes
   registerAuthRoutes(app);
 

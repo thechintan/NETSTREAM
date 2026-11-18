@@ -4,10 +4,12 @@ import type { CategoryDto } from '@netstream/shared';
 import { useAuth } from '../features/auth/AuthContext';
 import { Button } from '../components/ui/Button';
 import { usePublisher, PublisherStatus } from '../features/studio/usePublisher';
+import { useWs } from '../lib/WsContext';
 import { api } from '../lib/api';
 
 export const Studio: React.FC = () => {
   const { user, channel } = useAuth();
+  const { client: wsClient, status: wsStatus } = useWs();
   const channelId = channel?.id;
 
   const { status, error: publisherError, startBroadcast, stopBroadcast, replaceVideoTrack } = usePublisher({
@@ -232,16 +234,32 @@ export const Studio: React.FC = () => {
         </div>
       </div>
 
-      {/* Permission or Publisher Error Notices */}
-      {(permissionError || publisherError) && (
-        <div className="bg-red-950/60 border border-red-800/80 rounded-xl p-4 flex items-start gap-3 text-red-200">
-          <svg className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-          <div className="text-sm">
-            <p className="font-semibold text-red-300">Action Required</p>
-            <p className="mt-0.5">{permissionError || publisherError}</p>
+      {/* Permission, Publisher, or Connection Error Notices */}
+      {(permissionError || publisherError || (wsStatus !== 'open' && wsStatus !== 'connecting')) && (
+        <div className="bg-red-950/60 border border-red-800/80 rounded-xl p-4 flex items-start justify-between gap-3 text-red-200">
+          <div className="flex items-start gap-3">
+            <svg className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <div className="text-sm">
+              <p className="font-semibold text-red-300">Action Required</p>
+              <p className="mt-0.5">
+                {permissionError ||
+                  publisherError ||
+                  `WebSocket is currently ${wsStatus}. Please reconnect.`}
+              </p>
+            </div>
           </div>
+          {wsStatus !== 'open' && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void wsClient.connect()}
+              className="text-xs flex-shrink-0"
+            >
+              Reconnect
+            </Button>
+          )}
         </div>
       )}
 
