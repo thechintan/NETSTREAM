@@ -49,6 +49,13 @@ export const envSchema = z.object({
 
 export type Config = z.infer<typeof envSchema>;
 
+export const INSECURE_DEFAULT_SECRETS = [
+  'dev_jwt_secret_must_be_at_least_32_characters_long_for_security',
+  'dev_cookie_secret_must_be_at_least_32_characters_long_for_security',
+  'dev_secret_change_me_in_production_12345678',
+  'cookie_secret_change_me_in_production_12345678',
+];
+
 export function parseConfig(rawEnv: Record<string, unknown>): Config {
   const result = envSchema.safeParse(rawEnv);
   if (!result.success) {
@@ -57,6 +64,29 @@ export function parseConfig(rawEnv: Record<string, unknown>): Config {
       .join('\n');
     throw new Error(`Environment validation failed:\n${errorMessages}`);
   }
+
+  // Refuse default development secrets in production mode
+  if (result.data.NODE_ENV === 'production') {
+    const jwtLower = result.data.JWT_SECRET.toLowerCase();
+    const cookieLower = result.data.COOKIE_SECRET.toLowerCase();
+
+    const isDefaultJwt =
+      INSECURE_DEFAULT_SECRETS.includes(result.data.JWT_SECRET) ||
+      jwtLower.includes('change_me') ||
+      jwtLower.includes('dev_');
+
+    const isDefaultCookie =
+      INSECURE_DEFAULT_SECRETS.includes(result.data.COOKIE_SECRET) ||
+      cookieLower.includes('change_me') ||
+      cookieLower.includes('dev_');
+
+    if (isDefaultJwt || isDefaultCookie) {
+      throw new Error(
+        'Insecure default secrets detected in production: JWT_SECRET and COOKIE_SECRET must be explicitly set to strong production values.'
+      );
+    }
+  }
+
   return result.data;
 }
 

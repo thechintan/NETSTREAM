@@ -1,4 +1,6 @@
 import fastifyCookie from '@fastify/cookie';
+import fastifyCors from '@fastify/cors';
+import fastifyHelmet from '@fastify/helmet';
 import Fastify, { FastifyInstance } from 'fastify';
 import { VERSION } from '@netstream/shared';
 import { registerAuthRoutes } from './auth/routes.js';
@@ -66,6 +68,33 @@ export function buildApp(gatewayOptions?: GatewayOptions): FastifyInstance & { g
     await getChatPersistenceWorker().close();
     await presenceWorker.close();
     await shutdownMedia();
+  });
+
+  // Register security headers with strict Content-Security-Policy
+  void app.register(fastifyHelmet, {
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'blob:'],
+        mediaSrc: ["'self'", 'blob:', 'data:'],
+        connectSrc: ["'self'", 'ws:', 'wss:', config.WEB_ORIGIN, 'blob:'],
+        workerSrc: ["'self'", 'blob:'],
+        frameAncestors: ["'none'"],
+        objectSrc: ["'none'"],
+        upgradeInsecureRequests: config.NODE_ENV === 'production' ? [] : null,
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+  });
+
+  // Register CORS limited to WEB_ORIGIN with credentials
+  void app.register(fastifyCors, {
+    origin: config.WEB_ORIGIN,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   });
 
   // Register cookie support

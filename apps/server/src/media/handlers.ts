@@ -342,6 +342,13 @@ export function registerMediaHandlers(gateway: WebSocketGateway): void {
       throw new WsHandlerError('BAD_REQUEST', 'Cannot consume on a non-receive transport');
     }
 
+    if (mediaState.consumers.size >= 4) {
+      throw new WsHandlerError(
+        'TOO_MANY_CONSUMERS',
+        'Maximum of 4 consumers allowed per connection'
+      );
+    }
+
     const viewer = room.viewers.get(conn.id);
     const consumerList: Array<{
       id: string;
@@ -352,6 +359,10 @@ export function registerMediaHandlers(gateway: WebSocketGateway): void {
 
     for (const producer of room.producers.values()) {
       if (producer.closed) continue;
+
+      if (mediaState.consumers.size >= 4) {
+        break;
+      }
 
       // Skip if viewer is already consuming this producer
       const alreadyConsuming = Array.from(mediaState.consumers.values()).some(

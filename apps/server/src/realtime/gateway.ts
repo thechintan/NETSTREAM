@@ -15,6 +15,8 @@ export interface GatewayOptions {
   heartbeatIntervalMs?: number;
   maxPayload?: number;
   maxPerSecond?: number;
+  maxConnectionsPerUser?: number;
+  maxConnectionsPerIp?: number;
 }
 
 export class WebSocketGateway {
@@ -22,6 +24,8 @@ export class WebSocketGateway {
   public readonly dispatcher: Dispatcher;
   public readonly conns = new Map<string, Conn>();
   public readonly rooms = new Map<string, Set<Conn>>();
+  public readonly maxConnectionsPerUser: number;
+  public readonly maxConnectionsPerIp: number;
   private connectHooks: ConnectHook[] = [];
   private cleanupHooks: CleanupHook[] = [];
   private heartbeatHooks: HeartbeatHook[] = [];
@@ -32,6 +36,8 @@ export class WebSocketGateway {
   constructor(options: GatewayOptions = {}) {
     this.allowedOrigin = options.allowedOrigin ?? config.WEB_ORIGIN;
     this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? 25000;
+    this.maxConnectionsPerUser = options.maxConnectionsPerUser ?? 5;
+    this.maxConnectionsPerIp = options.maxConnectionsPerIp ?? 20;
 
     this.wss = new WebSocketServer({
       noServer: true,
@@ -86,6 +92,25 @@ export class WebSocketGateway {
         return;
       }
 
+      // Check per-IP connection cap
+      const forwarded = req.headers['x-forwarded-for'];
+      const rawIp =
+        (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress) ||
+        '127.0.0.1';
+
+      let ipConnections = 0;
+      for (const c of this.conns.values()) {
+        if (c.ip === rawIp) {
+          ipConnections++;
+        }
+      }
+
+      if (ipConnections >= this.maxConnectionsPerIp) {
+        socket.write('HTTP/1.1 429 Too Many Requests\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+
       // 2. Extract and redeem ticket
       const ticket = url.searchParams.get('ticket');
       if (!ticket) {
@@ -113,9 +138,25 @@ export class WebSocketGateway {
             guest: false,
           };
 
+      // Check per-user connection cap (authenticated users only)
+      if (!user.guest) {
+        let userConnections = 0;
+        for (const c of this.conns.values()) {
+          if (!c.user.guest && c.user.id === user.id) {
+            userConnections++;
+          }
+        }
+
+        if (userConnections >= this.maxConnectionsPerUser) {
+          socket.write('HTTP/1.1 429 Too Many Requests\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+      }
+
       // 3. Upgrade socket
       this.wss.handleUpgrade(req, socket, head, (ws) => {
-        this.handleConnection(ws, user);
+        this.handleConnection(ws, user, rawIp);
       });
     } catch {
       socket.write('HTTP/1.1 500 Internal Server Error\r\n\r\n');
@@ -123,8 +164,8 @@ export class WebSocketGateway {
     }
   }
 
-  private handleConnection(ws: WebSocket, user: ConnUser): void {
-    const conn = new Conn(ws, user);
+  public handleConnection(ws: WebSocket, user: ConnUser, ip = '127.0.0.1'): Conn {
+    const conn = new Conn(ws, user, undefined, ip);
     this.conns.set(conn.id, conn);
 
     for (const hook of this.connectHooks) {
@@ -178,6 +219,8 @@ export class WebSocketGateway {
     ws.on('error', () => {
       // ws close event will also fire following an error
     });
+
+    return conn;
   }
 
   /**
@@ -303,7 +346,9 @@ export class WebSocketGateway {
     }
 
     for (const conn of this.conns.values()) {
-      conn.ws.terminate();
+      if (typeof conn.ws?.terminate === 'function') {
+        conn.ws.terminate();
+      }
     }
     for (const ws of this.wss.clients) {
       ws.terminate();

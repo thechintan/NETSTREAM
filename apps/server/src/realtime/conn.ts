@@ -21,11 +21,13 @@ export class Conn {
   public readonly rooms: Set<string>;
   public readonly state: Map<string, unknown>;
   public readonly ws: WebSocket;
+  public readonly ip: string;
 
-  constructor(ws: WebSocket, user: ConnUser, id?: string) {
+  constructor(ws: WebSocket, user: ConnUser, id?: string, ip = '127.0.0.1') {
     this.ws = ws;
     this.user = user;
     this.id = id || crypto.randomUUID();
+    this.ip = ip;
     this.alive = true;
     this.rooms = new Set<string>();
     this.state = new Map<string, unknown>();

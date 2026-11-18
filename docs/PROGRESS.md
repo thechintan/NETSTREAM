@@ -659,5 +659,55 @@
    - Open `/c/<streamer>` and click **Clock** in the player bar.
    - Take a screenshot of both clocks side-by-side: `Latency = Viewer Epoch Ms - Sender Epoch Ms in frame`.
 
+### Verification of Security Pass (Task 27)
+
+1. **Run Security Test Suite**:
+   ```bash
+   pnpm --filter @netstream/server test src/security/security.test.ts
+   ```
+   Verifies:
+   - Startup refusal on default `JWT_SECRET` / `COOKIE_SECRET` when `NODE_ENV=production`.
+   - Path traversal rejection on `/hls` and `/vod` with `../`, encoded `%2e%2e`, and absolute paths.
+   - Gateway caps: max 20 connections per IP, max 5 per user ID (HTTP 429).
+   - Media caps: max 2 transports, max 4 consumers per connection (`TOO_MANY_CONSUMERS`).
+
+2. **Audit Findings & Unsafe HTML**:
+   - Confirmed 0 occurrences of `dangerouslySetInnerHTML` and `innerHTML` in `apps/web/src` and `apps/server/src`.
+   - Detailed threat table and `pnpm audit` analysis documented in `docs/SECURITY.md`.
+
+### Verification of Whole Stack Run & LAN Demo Mode (Task 28)
+
+1. **Validate Docker Compose Production Stack**:
+   ```bash
+   docker-compose -f infra/docker-compose.prod.yml config
+   ```
+
+2. **LAN Demo Execution Steps**:
+   - **Step 1**: On the host machine, run the LAN detection script:
+     ```bash
+     ./scripts/lan-demo.sh
+     # Or on Windows:
+     .\scripts\lan-demo.ps1
+     ```
+     This auto-detects the host Wi-Fi IPv4 address (e.g. `192.168.1.50`), configures `PUBLIC_IP`, `TURN_HOST`, `WEB_ORIGIN`, and `SITE_ADDRESS` in `.env`, and sets up trusted local certificates with `mkcert` (or falls back to Caddy internal TLS).
+   - **Step 2**: Build web assets and start all production services:
+     ```bash
+     make up
+     # Or:
+     pnpm --filter @netstream/web build
+     docker compose -f infra/docker-compose.prod.yml up --build -d
+     ```
+   - **Step 3**: Verify all services report healthy:
+     ```bash
+     docker compose -f infra/docker-compose.prod.yml ps
+     ```
+   - **Step 4**: On the host machine, open `https://localhost` or `https://<HOST_LAN_IP>`, log in as `streamer`, open `/studio`, and click **Go Live**.
+   - **Step 5**: On a second device (smartphone, tablet, or another laptop on the same Wi-Fi):
+     - Open `https://<HOST_LAN_IP>` (e.g., `https://192.168.1.50`).
+     - Accept the self-signed certificate if prompted (or install the root CA if using `mkcert`).
+     - Register an account (or browse as guest), open `/c/streamer`, and verify sub-second WebRTC video playback with live chat.
+     - *(Reverse flow)*: Stream from the mobile device's camera to the host player; HTTPS guarantees `navigator.mediaDevices.getUserMedia` permissions are granted.
+
+
 
 

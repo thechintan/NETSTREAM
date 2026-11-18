@@ -1,0 +1,56 @@
+{
+    admin off
+}
+
+# Site configuration: defaults to localhost with internal TLS, or real domain in production
+{$SITE_ADDRESS:localhost} {
+    tls {$TLS_MODE:internal}
+
+    # API endpoints
+    handle /api/* {
+        reverse_proxy server:3000 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # WebSocket connection
+    handle /ws {
+        reverse_proxy server:3000 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # Live HLS streams
+    handle /hls/* {
+        reverse_proxy server:3000 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # Past VOD recordings
+    handle /vod/* {
+        reverse_proxy server:3000 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # Static web app (SPA fallback)
+    handle {
+        root * /srv
+        encode gzip zstd
+        file_server
+        try_files {path} /index.html
+    }
+}
