@@ -6,7 +6,7 @@ import { registerChannelRoutes } from './channels/routes.js';
 import { getChatPersistenceWorker, registerChatHandlers } from './chat/index.js';
 import { registerModerationHandlers, registerModerationRoutes } from './moderation/index.js';
 import { initPresenceWorker, registerPresenceHandlers } from './presence/index.js';
-import { initMedia, registerMediaHandlers, shutdownMedia } from './media/index.js';
+import { initMedia, registerMediaHandlers, shutdownMedia, recoverCrashedStreamsOnBoot } from './media/index.js';
 import { registerMediaRoutes } from './media/routes.js';
 import { config } from './config/index.js';
 import { pingDb } from './db/index.js';
@@ -45,6 +45,7 @@ export function buildApp(gatewayOptions?: GatewayOptions): FastifyInstance & { g
 
   app.addHook('onReady', async () => {
     await initMedia();
+    await recoverCrashedStreamsOnBoot();
   });
 
   app.addHook('onClose', async () => {

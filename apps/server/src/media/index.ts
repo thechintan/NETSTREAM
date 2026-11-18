@@ -7,6 +7,7 @@ export * from './worker-pool.js';
 export * from './room-manager.js';
 export * from './transport.js';
 export * from './handlers.js';
+export * from './lifecycle.js';
 
 let workerPool: WorkerPool | null = null;
 let roomManager: RoomManager | null = null;

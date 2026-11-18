@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChannelDetailDto, ViewersCountPayload } from '@netstream/shared';
+import { ChannelDetailDto, StreamLivePayload, StreamOfflinePayload, ViewersCountPayload } from '@netstream/shared';
 import { Avatar } from '../components/ui/Avatar';
 import { Button } from '../components/ui/Button';
 import { Skeleton } from '../components/ui/Skeleton';
@@ -70,9 +70,23 @@ export const Channel: React.FC = () => {
       }
     });
 
+    const unsubLive = client.on<StreamLivePayload>('stream.live', (data) => {
+      if (isMounted && data.channelId === channel.id) {
+        setChannel((prev) => (prev ? { ...prev, isLive: true } : prev));
+      }
+    });
+
+    const unsubOffline = client.on<StreamOfflinePayload>('stream.offline', (data) => {
+      if (isMounted && data.channelId === channel.id) {
+        setChannel((prev) => (prev ? { ...prev, isLive: false } : prev));
+      }
+    });
+
     return () => {
       isMounted = false;
       unsub();
+      unsubLive();
+      unsubOffline();
     };
   }, [channel?.id, client]);
 

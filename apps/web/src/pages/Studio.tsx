@@ -16,6 +16,33 @@ export const Studio: React.FC = () => {
     channelId,
   });
 
+  const [liveDuration, setLiveDuration] = useState(0);
+
+  // Track stream duration while live
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    if (status === 'live') {
+      timer = setInterval(() => {
+        setLiveDuration((prev) => prev + 1);
+      }, 1000);
+    } else {
+      setLiveDuration(0);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [status]);
+
+  const formatDuration = (seconds: number) => {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    if (hrs > 0) {
+      return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [categories, setCategories] = useState<CategoryDto[]>([]);
@@ -215,6 +242,11 @@ export const Studio: React.FC = () => {
           <div className="flex items-center gap-3">
             <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">Creator Studio</h1>
             <StatusBadge status={status} />
+            {status === 'live' && (
+              <span className="text-xs font-mono font-medium text-emerald-400 bg-emerald-950/70 border border-emerald-800/80 px-2.5 py-0.5 rounded-full">
+                {formatDuration(liveDuration)}
+              </span>
+            )}
           </div>
           <p className="text-gray-400 mt-1 text-sm">
             Broadcasting to <span className="text-purple-400 font-medium">@{channel?.name || user?.username}</span>
@@ -233,6 +265,17 @@ export const Studio: React.FC = () => {
           </Link>
         </div>
       </div>
+
+      {/* Streamer Reconnecting Notice */}
+      {status === 'reconnecting' && (
+        <div className="bg-amber-950/70 border border-amber-700/80 rounded-xl p-4 flex items-center gap-3 text-amber-200">
+          <div className="w-3 h-3 rounded-full bg-amber-400 animate-ping shrink-0" />
+          <div className="text-sm">
+            <p className="font-semibold text-amber-300">Reconnecting to Stream...</p>
+            <p className="text-xs text-amber-200/80">Connection was interrupted. Viewers have a 15-second grace period while the stream recovers.</p>
+          </div>
+        </div>
+      )}
 
       {/* Permission, Publisher, or Connection Error Notices */}
       {(permissionError || publisherError || (wsStatus !== 'open' && wsStatus !== 'connecting')) && (
@@ -449,6 +492,13 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({ status }) => {
         <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-900/60 text-red-300 border border-red-700/60">
           <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse"></span>
           Live
+        </span>
+      );
+    case 'reconnecting':
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-900/60 text-amber-300 border border-amber-700/60">
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+          Reconnecting
         </span>
       );
     case 'connecting':

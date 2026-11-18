@@ -1,0 +1,5 @@
+- Built stream lifecycle state machine (`OFFLINE`, `STARTING`, `LIVE`, `ENDING`) in `apps/server/src/media/lifecycle.ts`, wiring video producer creation to DB `is_live=true`, `streams` persistence, and `stream.live` pushes to directory and followers.
+- Handled publisher drop with 15-second grace timer broadcasting `stream.reconnecting` to viewers, seamless recovery on reconnect, `media.end` / grace expiry teardown persisting `peak_viewers`, and boot crash recovery.
+- Files: `packages/shared/src/protocol.ts`, `apps/server/src/media/lifecycle.ts`, `handlers.ts`, `index.ts`, `apps/server/src/app.ts`, `channels/service.ts`, `apps/web/src/pages/Studio.tsx`, `Sidebar.tsx`, `Channel.tsx`, `usePublisher.ts`, `useViewer.ts`.
+- Decisions: Integrated in-memory lifecycle state checks in `/api/live` and `/api/channels/:name` to prevent stale live flags; Studio tracks duration timer and shows reconnecting alert banner.
+- Verification: Ran `pnpm --filter @netstream/server test run src/media/lifecycle.test.ts` (6/6 tests passed); all workspaces typechecked cleanly.

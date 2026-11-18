@@ -26,7 +26,8 @@ export type WsErrorCode =
   | 'ALREADY_PUBLISHING'
   | 'TOO_MANY_TRANSPORTS'
   | 'PRODUCER_EXISTS'
-  | 'MEDIA_OFFLINE';
+  | 'MEDIA_OFFLINE'
+  | 'STREAM_ALREADY_LIVE';
 
 // Generic envelope schema
 export const wsEnvelopeSchema = z.object({
@@ -173,6 +174,12 @@ export const streamOfflinePayloadSchema = z.object({
 
 export type StreamOfflinePayload = z.infer<typeof streamOfflinePayloadSchema>;
 
+export const streamReconnectingPayloadSchema = z.object({
+  channelId: z.string().uuid(),
+});
+
+export type StreamReconnectingPayload = z.infer<typeof streamReconnectingPayloadSchema>;
+
 // Real payload schemas for media.* signaling
 export const mediaJoinPayloadSchema = z.object({
   channelId: z.string().uuid(),
@@ -255,6 +262,10 @@ export interface MediaConsumerClosedPayload {
 // Viewer signaling placeholders (tightened in later tasks)
 export const mediaSetLayersPayloadSchema = z.any();
 export const mediaRestartIcePayloadSchema = z.any();
+export const mediaEndPayloadSchema = z.object({
+  channelId: z.string().uuid().optional(),
+}).optional().default({});
+export type MediaEndPayload = z.infer<typeof mediaEndPayloadSchema>;
 
 // Test echo payload schema (for tests and diagnostics)
 export const testEchoPayloadSchema = z.record(z.unknown()).optional().default({});
@@ -272,6 +283,7 @@ export const clientMessageSchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('media.resume'), id: z.string().optional(), d: mediaResumePayloadSchema }),
   z.object({ t: z.literal('media.setLayers'), id: z.string().optional(), d: mediaSetLayersPayloadSchema }),
   z.object({ t: z.literal('media.restartIce'), id: z.string().optional(), d: mediaRestartIcePayloadSchema }),
+  z.object({ t: z.literal('media.end'), id: z.string().optional(), d: mediaEndPayloadSchema }),
   z.object({ t: z.literal('mod.ban'), id: z.string().optional(), d: modBanPayloadSchema }),
   z.object({ t: z.literal('mod.timeout'), id: z.string().optional(), d: modTimeoutPayloadSchema }),
   z.object({ t: z.literal('mod.delete'), id: z.string().optional(), d: modDeletePayloadSchema }),
@@ -292,6 +304,7 @@ export type ServerToClientPushType =
   | 'viewers.count'
   | 'stream.live'
   | 'stream.offline'
+  | 'stream.reconnecting'
   | 'media.newProducer'
   | 'media.consumerClosed'
   | 'media.layers'

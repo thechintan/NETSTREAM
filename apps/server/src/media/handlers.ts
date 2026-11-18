@@ -5,6 +5,12 @@ import type { WebSocketGateway, Conn } from '../realtime/index.js';
 import { WsHandlerError } from '../realtime/index.js';
 import { getRoomManager } from './index.js';
 import type { ConnMediaState } from './types.js';
+import {
+  startPublisherSession,
+  onVideoProducerCreated,
+  onPublisherDisconnected,
+  endStream,
+} from './lifecycle.js';
 
 export function registerMediaHandlers(gateway: WebSocketGateway): void {
   // 1. media.join
@@ -32,19 +38,32 @@ export function registerMediaHandlers(gateway: WebSocketGateway): void {
         throw new WsHandlerError('FORBIDDEN', 'Only the channel owner can publish');
       }
 
+      try {
+        startPublisherSession(channelId, conn.user.id, conn.id);
+      } catch (err: unknown) {
+        if (err instanceof Error && err.message === 'STREAM_ALREADY_LIVE') {
+          throw new WsHandlerError(
+            'ALREADY_PUBLISHING',
+            'Another connection is already publishing to this channel'
+          );
+        }
+        throw err;
+      }
+
       const room = await roomManager.getOrCreate(channelId);
 
       if (room.publisher && room.publisher.connId !== conn.id) {
-        throw new WsHandlerError(
-          'ALREADY_PUBLISHING',
-          'Another connection is already publishing to this channel'
-        );
+        // If the previous publisher connection is stale, update to this connection
+        room.publisher = {
+          userId: conn.user.id,
+          connId: conn.id,
+        };
+      } else {
+        room.publisher = {
+          userId: conn.user.id,
+          connId: conn.id,
+        };
       }
-
-      room.publisher = {
-        userId: conn.user.id,
-        connId: conn.id,
-      };
 
       const mediaState: ConnMediaState = {
         channelId,
@@ -205,6 +224,10 @@ export function registerMediaHandlers(gateway: WebSocketGateway): void {
     room.producers.set(producer.id, producer);
     mediaState.producers.set(producer.id, producer);
 
+    if (kind === 'video') {
+      await onVideoProducerCreated(mediaState.channelId, conn.id);
+    }
+
     producer.on('transportclose', () => {
       room.producers.delete(producer.id);
       mediaState.producers.delete(producer.id);
@@ -348,7 +371,35 @@ export function registerMediaHandlers(gateway: WebSocketGateway): void {
     return { resumed };
   });
 
-  // 7. Cleanup hook
+  // 7. media.end
+  gateway.dispatcher.register('media.end', async (conn: Conn, msg) => {
+    const mediaState = conn.state.get('media') as ConnMediaState | undefined;
+    const channelId = msg.d?.channelId || mediaState?.channelId;
+
+    if (!channelId) {
+      throw new WsHandlerError('BAD_REQUEST', 'Channel ID is required to end stream');
+    }
+
+    if (conn.user.guest) {
+      throw new WsHandlerError('FORBIDDEN', 'Authentication required to end stream');
+    }
+
+    // Verify channel ownership
+    const [channel] = await db
+      .select({ id: channels.id, ownerId: channels.ownerId })
+      .from(channels)
+      .where(eq(channels.id, channelId))
+      .limit(1);
+
+    if (!channel || channel.ownerId !== conn.user.id) {
+      throw new WsHandlerError('FORBIDDEN', 'Only the channel owner can end the stream');
+    }
+
+    await endStream(channelId, gateway, 'manual_end');
+    return { ok: true };
+  });
+
+  // 8. Cleanup hook
   gateway.onCleanup(async (conn: Conn) => {
     let roomManager;
     try {
@@ -389,8 +440,8 @@ export function registerMediaHandlers(gateway: WebSocketGateway): void {
       // Clear publisher
       room.publisher = undefined;
 
-      // Broadcast media.consumerClosed to viewers of that room
-      gateway.broadcastToRoom(`media:${mediaState.channelId}`, 'media.consumerClosed', {});
+      // Notify lifecycle state machine (starts 15s grace timer for LIVE stream)
+      await onPublisherDisconnected(mediaState.channelId, conn.id, gateway);
     } else if (mediaState.role === 'viewer') {
       // Close viewer consumers
       if (mediaState.consumers) {

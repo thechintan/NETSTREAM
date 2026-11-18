@@ -7,7 +7,7 @@ import type {
 } from '@netstream/shared';
 import { useWs } from '../../lib/WsContext';
 
-export type PublisherStatus = 'idle' | 'connecting' | 'live' | 'error';
+export type PublisherStatus = 'idle' | 'connecting' | 'live' | 'reconnecting' | 'error';
 
 export interface UsePublisherOptions {
   channelId?: string;
@@ -25,6 +25,11 @@ export function usePublisher({ channelId }: UsePublisherOptions) {
   const activeStreamRef = useRef<MediaStream | null>(null);
 
   const stopBroadcast = useCallback(() => {
+    // Notify server of stream ending
+    if (channelId) {
+      void ws.request('media.end', { channelId }).catch(() => {});
+    }
+
     // 1. Close producers
     if (audioProducerRef.current) {
       try {
@@ -208,6 +213,25 @@ export function usePublisher({ channelId }: UsePublisherOptions) {
       await videoProducerRef.current.replaceTrack({ track: newTrack });
     }
   }, []);
+
+  // Handle WS disconnect/reconnect while live
+  useEffect(() => {
+    const unsub = ws.client.on('status', (wsState) => {
+      if (wsState === 'reconnecting' || wsState === 'closed') {
+        if (status === 'live') {
+          setStatus('reconnecting');
+        }
+      } else if (wsState === 'open') {
+        if (status === 'reconnecting' && activeStreamRef.current) {
+          void startBroadcast(activeStreamRef.current);
+        }
+      }
+    });
+
+    return () => {
+      unsub();
+    };
+  }, [ws.client, status, startBroadcast]);
 
   // Cleanup on unmount
   useEffect(() => {

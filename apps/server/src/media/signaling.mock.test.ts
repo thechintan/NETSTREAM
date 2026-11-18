@@ -7,6 +7,7 @@ import { Conn } from '../realtime/conn.js';
 import { WsHandlerError } from '../realtime/dispatcher.js';
 import { WebSocketGateway } from '../realtime/gateway.js';
 import { registerMediaHandlers } from './handlers.js';
+import { resetLifecycleForTest } from './lifecycle.js';
 import * as mediaModule from './index.js';
 import type { RoomManager } from './room-manager.js';
 import type { Room } from './types.js';
@@ -86,15 +87,28 @@ describe('Task 12: Handlers Unit Tests with Mocked mediasoup Objects', () => {
       heartbeatIntervalMs: 100000,
     });
 
-    // Mock db.select
-    vi.spyOn(db, 'select').mockImplementation((() => ({
-      from: () => ({
-        where: () => ({
-          limit: async () => [{ id: channelId, ownerId }],
-        }),
+    // Mock db.select, insert, update
+    const mockSelectChain: any = {
+      from: () => mockSelectChain,
+      innerJoin: () => mockSelectChain,
+      leftJoin: () => mockSelectChain,
+      where: () => mockSelectChain,
+      limit: async () => [{ id: channelId, ownerId, name: 'test', title: 'test', ownerUsername: 'test' }],
+      then: (resolve: any) => resolve([{ id: channelId, ownerId, name: 'test', title: 'test', ownerUsername: 'test' }]),
+    };
+    vi.spyOn(db, 'select').mockImplementation((() => mockSelectChain) as any);
+    vi.spyOn(db, 'insert').mockImplementation((() => ({
+      values: () => ({
+        returning: async () => [{ id: 'stream-1' }],
+      }),
+    })) as any);
+    vi.spyOn(db, 'update').mockImplementation((() => ({
+      set: () => ({
+        where: async () => [],
       }),
     })) as any);
 
+    resetLifecycleForTest();
     registerMediaHandlers(gateway);
   });
 

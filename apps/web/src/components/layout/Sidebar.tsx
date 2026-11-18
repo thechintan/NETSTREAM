@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { FollowedChannelDto } from '@netstream/shared';
+import { FollowedChannelDto, StreamLivePayload, StreamOfflinePayload } from '@netstream/shared';
 import { useAuth } from '../../features/auth/AuthContext';
 import { api } from '../../lib/api';
+import { useWs } from '../../lib/ws';
 import { Avatar } from '../ui/Avatar';
 import { Skeleton } from '../ui/Skeleton';
 
@@ -13,6 +14,7 @@ export interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
   const { user } = useAuth();
+  const { client } = useWs();
   const [following, setFollowing] = useState<FollowedChannelDto[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -47,6 +49,26 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
       clearInterval(interval);
     };
   }, [user]);
+
+  // Realtime updates on stream.live and stream.offline for followed channels
+  useEffect(() => {
+    const unsubLive = client.on<StreamLivePayload>('stream.live', (data) => {
+      setFollowing((prev) =>
+        prev.map((c) => (c.id === data.channelId ? { ...c, isLive: true } : c))
+      );
+    });
+
+    const unsubOffline = client.on<StreamOfflinePayload>('stream.offline', (data) => {
+      setFollowing((prev) =>
+        prev.map((c) => (c.id === data.channelId ? { ...c, isLive: false } : c))
+      );
+    });
+
+    return () => {
+      unsubLive();
+      unsubOffline();
+    };
+  }, [client]);
 
   return (
     <>

@@ -18,6 +18,7 @@ import {
 } from '../db/index.js';
 import { redis } from '../lib/redis.js';
 import { getViewerCount } from '../presence/service.js';
+import { getStreamState } from '../media/lifecycle.js';
 
 export async function getCategories(): Promise<CategoryDto[]> {
   const result = await db
@@ -107,7 +108,13 @@ export async function getChannelByName(
       : null,
     followerCount,
     viewerCount,
-    isLive: channelData.isLive,
+    isLive:
+      getStreamState(channelData.id) === 'LIVE'
+        ? true
+        : getStreamState(channelData.id) === 'OFFLINE' ||
+            getStreamState(channelData.id) === 'ENDING'
+          ? false
+          : channelData.isLive,
     ownerUsername: channelData.ownerUsername,
     ownerId: channelData.ownerId,
     isFollowing,
@@ -377,8 +384,14 @@ export async function getLiveChannels(filters?: {
     .where(and(...conditions))
     .orderBy(desc(sql`COALESCE(${streams.startedAt}, ${channels.createdAt})`));
 
+  const liveResults = results.filter((row) => {
+    const state = getStreamState(row.id);
+    if (state === 'OFFLINE' || state === 'ENDING') return false;
+    return true;
+  });
+
   return await Promise.all(
-    results.map(async (row) => ({
+    liveResults.map(async (row) => ({
       id: row.id,
       name: row.name,
       title: row.title,

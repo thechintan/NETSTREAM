@@ -502,3 +502,18 @@
    - In Tab A, click "End Stream" or close the tab: Tab B immediately transitions to offline state.
    - In Tab A, go live again: Tab B recovers and resumes playback without a page reload.
 
+### Verification of Stream Lifecycle State Machine (Task 14)
+
+1. **Run Vitest Unit Tests**:
+   ```bash
+   pnpm --filter @netstream/server test run src/media/lifecycle.test.ts
+   ```
+
+2. **Manual End-to-End Verification**:
+   - In Tab A, go live from Creator Studio (`/studio`). Confirm the header displays the duration counter (`MM:SS`) and Home/Sidebar reflect the live channel.
+   - In Tab B, watch the stream at `/c/<name>`.
+   - Kill Tab A (or close the browser window): Tab B displays "Streamer reconnecting..." with a 15-second grace window.
+   - Reopen Tab A at `/studio` within 15 seconds: Tab A re-establishes the broadcast, Tab B recovers playback without refreshing.
+   - Kill Tab A again and wait longer than 15 seconds: the stream terminates, Tab B transitions to offline, and the channel disappears from the Home directory grid.
+
+

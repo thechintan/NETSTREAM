@@ -7,6 +7,7 @@ import type {
   ConsumerInfo,
   MediaNewProducerPayload,
   MediaConsumerClosedPayload,
+  StreamReconnectingPayload,
 } from '@netstream/shared';
 import { useWs } from '../../lib/WsContext';
 
@@ -318,7 +319,17 @@ export function useViewer({ channelId }: UseViewerOptions) {
       }
     );
 
-    // 3. Ws reconnect event
+    // 3. stream.reconnecting
+    const unsubReconnecting = ws.client.on<StreamReconnectingPayload>(
+      'stream.reconnecting',
+      (data) => {
+        if (!data?.channelId || data.channelId === channelId) {
+          setStatus('reconnecting');
+        }
+      }
+    );
+
+    // 4. Ws reconnect event
     const unsubStatus = ws.client.on('status', (newStatus) => {
       if (newStatus === 'open' && status === 'reconnecting') {
         void connectToStream();
@@ -332,6 +343,7 @@ export function useViewer({ channelId }: UseViewerOptions) {
     return () => {
       unsubNewProducer();
       unsubConsumerClosed();
+      unsubReconnecting();
       unsubStatus();
     };
   }, [channelId, ws.client, status, connectToStream, consumeProducers, cleanupMedia]);
