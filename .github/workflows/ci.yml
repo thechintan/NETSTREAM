@@ -55,28 +55,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 11.5.3
 
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v4
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
         with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
+          node-version: 22
+          cache: 'pnpm'
 
       - name: Install system dependencies (FFmpeg & Mediasoup build tools)
         run: |
@@ -104,12 +92,6 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
-      - name: Start backend & frontend for E2E
-        run: |
-          pnpm --filter @netstream/server dev &
-          pnpm --filter @netstream/web dev --port 5173 &
-          sleep 5
-
       - name: Run Playwright E2E tests
         run: npx playwright test
 
@@ -119,6 +101,7 @@ jobs:
         with:
           name: playwright-traces
           path: test-results/
+          if-no-files-found: ignore
           retention-days: 7
 
   python-lab:
