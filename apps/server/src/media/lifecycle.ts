@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { channels, db, streams, users, categories } from '../db/index.js';
 import { notifyFollowersChannelLive } from '../notifications/service.js';
 import { getPeak, resetPeak } from '../presence/service.js';

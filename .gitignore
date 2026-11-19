@@ -25,6 +25,12 @@ pnpm-debug.log*
 /hls/
 /vod/
 
+# Testing
+test-results/
+playwright-report/
+__pycache__/
+*.pyc
+
 # OS / Editor
 .DS_Store
 Thumbs.db

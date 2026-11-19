@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../app.js';
 import { closeDb } from '../db/index.js';
 import { runMigrations } from '../db/migrate.js';
-import { closeRedis } from '../lib/redis.js';
+import { closeRedis, redis } from '../lib/redis.js';
 import { redeemTicket } from './ticket.js';
 
 describe('Authentication & Sessions Integration Tests', () => {
@@ -11,6 +11,11 @@ describe('Authentication & Sessions Integration Tests', () => {
 
   beforeAll(async () => {
     await runMigrations();
+    // Clear residual rate limit keys from prior test runs
+    const ratelimitKeys = await redis.keys('ratelimit:*');
+    if (ratelimitKeys.length > 0) {
+      await redis.del(...ratelimitKeys);
+    }
     app = buildApp();
     await app.ready();
   });

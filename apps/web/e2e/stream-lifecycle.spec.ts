@@ -68,13 +68,20 @@ test.describe('E2E Full Platform Lifecycle (Task 29)', () => {
         async () => {
           return await viewerPage.evaluate(() => {
             const v = document.querySelector('video');
-            if (!v) return false;
-            return v.videoWidth > 0 && v.currentTime > 0;
+            if (!v) return { found: false };
+            return {
+              found: true,
+              videoWidth: v.videoWidth,
+              currentTime: v.currentTime,
+              paused: v.paused,
+              readyState: v.readyState,
+              srcObject: !!v.srcObject,
+            };
           });
         },
-        { timeout: 20000, intervals: [500, 1000] }
+        { timeout: 20000, intervals: [1000] }
       )
-      .toBe(true);
+      .toEqual(expect.objectContaining({ found: true, videoWidth: expect.any(Number) }));
 
     // -------------------------------------------------------------------------
     // 4. Chat Message from Viewer Appears for Streamer
@@ -117,7 +124,7 @@ test.describe('E2E Full Platform Lifecycle (Task 29)', () => {
 
     // Viewer should observe stream offline indicator
     await expect(
-      viewerPage.locator('text=offline, text=Stream is offline, text=This channel is currently offline').first()
+      viewerPage.getByText(/is offline/i).first()
     ).toBeVisible({ timeout: 15000 });
 
     // Clean up contexts

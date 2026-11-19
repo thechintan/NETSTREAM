@@ -3,7 +3,6 @@ import { parseConfig } from '../config/index.js';
 import { resolveSafeHlsPath } from '../recording/routes.js';
 import { resolveSafeVodPath } from '../recording/vod-service.js';
 import { WebSocketGateway } from '../realtime/gateway.js';
-import { Conn } from '../realtime/conn.js';
 import { WsHandlerError } from '../realtime/dispatcher.js';
 
 describe('Security Pass Tests (Task 27)', () => {

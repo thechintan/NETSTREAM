@@ -9,6 +9,7 @@ import {
   createLatencyClockStream,
   type LatencyClockStreamHandle,
 } from '../features/lab';
+import { ChatPanel } from '../features/chat/ChatPanel';
 import { useWs } from '../lib/WsContext';
 import { api } from '../lib/api';
 
@@ -702,6 +703,26 @@ export const Studio: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {/* Live Stream Chat & Moderation */}
+          {channelId && (
+            <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden shadow-xl h-[480px] flex flex-col">
+              <div className="px-4 py-2 bg-gray-950 border-b border-gray-800 flex items-center justify-between">
+                <span className="text-xs font-semibold text-gray-200">Stream Chat</span>
+                <span className="text-[10px] text-purple-400 font-mono bg-purple-950/70 border border-purple-800/80 px-2 py-0.5 rounded-full">
+                  Mod View
+                </span>
+              </div>
+              <div className="flex-1 min-h-0">
+                <ChatPanel
+                  channelId={channelId}
+                  channelName={channel?.name || user?.username || 'streamer'}
+                  channelOwnerId={channel?.ownerId || user?.id}
+                  isMod={true}
+                />
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

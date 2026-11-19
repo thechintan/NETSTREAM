@@ -221,10 +221,29 @@ describe('Task 8: Chat Rate Limiting, Slow Mode, Replay & Persistence Tests', ()
   });
 
   it('4. batch writer flushes on count and on timer', async () => {
+    // Register real user and channel so DB flush passes foreign key constraints
+    const regRes = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      remoteAddress: `10.88.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`,
+      payload: {
+        email: `worker_user_${Date.now()}@netstream.live`,
+        username: `wrk_${Date.now().toString().slice(-6)}_${Math.random().toString(36).slice(2, 5)}`,
+        password: 'Password123!',
+      },
+    });
+    const { user: realUser, accessToken } = JSON.parse(regRes.body);
+    const meRes = await app.inject({
+      method: 'GET',
+      url: '/api/me',
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+    const realChanId = JSON.parse(meRes.body).channel.id;
+
     // 4a. Flush on count (batchSize: 3)
     const countWorker = new ChatPersistenceWorker({ batchSize: 3, flushIntervalMs: 60000 });
-    const dummyChanId = crypto.randomUUID();
-    const dummyUserId = crypto.randomUUID();
+    const dummyChanId = realChanId;
+    const dummyUserId = realUser.id;
 
     const dummyMsg = (text: string): ChatMessageDto => ({
       mid: `01H000000000000000000000${Math.random().toString(36).slice(2, 6)}`,
@@ -286,44 +305,46 @@ describe('Task 8: Chat Rate Limiting, Slow Mode, Replay & Persistence Tests', ()
       username: user.username,
       guest: false,
     });
-    await request(client, 'chat.join', { channelId });
+    try {
+      await request(client, 'chat.join', { channelId });
 
-    for (let i = 1; i <= 5; i++) {
-      await request(client, 'chat.send', {
-        channelId,
-        text: `Persistent message ${i}`,
+      for (let i = 1; i <= 5; i++) {
+        await request(client, 'chat.send', {
+          channelId,
+          text: `Persistent message ${i}`,
+        });
+      }
+
+      // Wait briefly for queue ingestion, then explicitly flush persistence worker to DB
+      await new Promise((r) => setTimeout(r, 350));
+      await getChatPersistenceWorker().flush();
+
+      // Page 1: Query 3 newest messages
+      const page1Res = await app.inject({
+        method: 'GET',
+        url: `/api/channels/${channelId}/chat/history?limit=3`,
       });
+      expect(page1Res.statusCode).toBe(200);
+      const page1 = JSON.parse(page1Res.body);
+      expect(page1.messages.length).toBe(3);
+      // Chronological order: [Message 3, Message 4, Message 5]
+      expect(page1.messages[0].text).toBe('Persistent message 3');
+      expect(page1.messages[1].text).toBe('Persistent message 4');
+      expect(page1.messages[2].text).toBe('Persistent message 5');
+
+      // Page 2: Query messages before the oldest of page 1 (Message 3)
+      const oldestMidPage1 = page1.messages[0].mid;
+      const page2Res = await app.inject({
+        method: 'GET',
+        url: `/api/channels/${channelId}/chat/history?before=${oldestMidPage1}&limit=3`,
+      });
+      expect(page2Res.statusCode).toBe(200);
+      const page2 = JSON.parse(page2Res.body);
+      expect(page2.messages.length).toBe(2);
+      expect(page2.messages[0].text).toBe('Persistent message 1');
+      expect(page2.messages[1].text).toBe('Persistent message 2');
+    } finally {
+      client.close();
     }
-
-    // Wait briefly for queue ingestion, then explicitly flush persistence worker to DB
-    await new Promise((r) => setTimeout(r, 150));
-    await getChatPersistenceWorker().flush();
-
-    // Page 1: Query 3 newest messages
-    const page1Res = await app.inject({
-      method: 'GET',
-      url: `/api/channels/${channelId}/chat/history?limit=3`,
-    });
-    expect(page1Res.statusCode).toBe(200);
-    const page1 = JSON.parse(page1Res.body);
-    expect(page1.messages.length).toBe(3);
-    // Chronological order: [Message 3, Message 4, Message 5]
-    expect(page1.messages[0].text).toBe('Persistent message 3');
-    expect(page1.messages[1].text).toBe('Persistent message 4');
-    expect(page1.messages[2].text).toBe('Persistent message 5');
-
-    // Page 2: Query messages before the oldest of page 1 (Message 3)
-    const oldestMidPage1 = page1.messages[0].mid;
-    const page2Res = await app.inject({
-      method: 'GET',
-      url: `/api/channels/${channelId}/chat/history?before=${oldestMidPage1}&limit=3`,
-    });
-    expect(page2Res.statusCode).toBe(200);
-    const page2 = JSON.parse(page2Res.body);
-    expect(page2.messages.length).toBe(2);
-    expect(page2.messages[0].text).toBe('Persistent message 1');
-    expect(page2.messages[1].text).toBe('Persistent message 2');
-
-    client.close();
   });
 });

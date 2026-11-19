@@ -59,6 +59,16 @@ export function registerChannelRoutes(app: FastifyInstance) {
     }
   );
 
+  // GET /api/channels/live (alias for /api/live)
+  app.get<{ Querystring: { category?: string; q?: string } }>(
+    '/api/channels/live',
+    async (request, reply) => {
+      const { category, q } = request.query;
+      const list = await getLiveChannels({ category, q });
+      return reply.status(200).send(list);
+    }
+  );
+
   // GET /api/channels/:name (public, optionalAuth for isFollowing)
   app.get<{ Params: { name: string } }>(
     '/api/channels/:name',
